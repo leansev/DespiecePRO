@@ -323,6 +323,244 @@ module BiraEstudio
       end
     end
 
+    module SpreadsheetExport
+      HEADERS = [
+        'cantidad',
+        'LARGO',
+        'ANCHO',
+        'nombre',
+        'rota',
+        'canto_arr',
+        'canto_aba',
+        'canto_izq',
+        'canto_der'
+      ].freeze
+
+      module_function
+
+      def build_rows
+        rows = [HEADERS.dup]
+
+        Store.export_payload['rows'].each do |item|
+          case item['type']
+          when 'module', 'total'
+            row = [item['label'].to_s]
+            (HEADERS.length - 1).times { row << '' }
+            rows << row
+          when 'piece'
+            rows << [
+              item['cantidad'],
+              item['largo'],
+              item['ancho'],
+              item['nombre'],
+              item['rota'],
+              item['canto_arr'],
+              item['canto_aba'],
+              item['canto_izq'],
+              item['canto_der']
+            ]
+          end
+        end
+
+        rows
+      end
+
+      def xml_escape(text)
+        text.to_s
+            .gsub('&', '&amp;')
+            .gsub('<', '&lt;')
+            .gsub('>', '&gt;')
+            .gsub('"', '&quot;')
+            .gsub("'", '&apos;')
+      end
+
+      def column_letter(index)
+        index += 1
+        letters = ''
+        while index > 0
+          index, remainder = (index - 1).divmod(26)
+          letters = (65 + remainder).chr + letters
+        end
+        letters
+      end
+
+      def numeric_cell?(value)
+        value.is_a?(Numeric) || value.to_s =~ /\A-?\d+\z/
+      end
+
+      def cell_xml(column_index, row_index, value)
+        reference = "#{column_letter(column_index)}#{row_index}"
+        if numeric_cell?(value)
+          "<c r=\"#{reference}\"><v>#{value.to_s}</v></c>"
+        else
+          text = xml_escape(value)
+          "<c r=\"#{reference}\" t=\"inlineStr\"><is><t>#{text}</t></is></c>"
+        end
+      end
+
+      def sheet_xml(rows)
+        body = rows.each_with_index.map do |row, row_index|
+          cells = row.each_with_index.map do |value, column_index|
+            next if value.nil? || value.to_s.empty?
+
+            cell_xml(column_index, row_index + 1, value)
+          end.compact.join
+
+          "<row r=\"#{row_index + 1}\">#{cells}</row>"
+        end.join
+
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' \
+          "<sheetData>#{body}</sheetData></worksheet>"
+      end
+
+      def xlsx_entries(rows)
+        {
+          '[Content_Types].xml' => content_types_xml,
+          '_rels/.rels' => root_rels_xml,
+          'xl/workbook.xml' => workbook_xml,
+          'xl/_rels/workbook.xml.rels' => workbook_rels_xml,
+          'xl/worksheets/sheet1.xml' => sheet_xml(rows),
+          'xl/styles.xml' => styles_xml
+        }
+      end
+
+      def content_types_xml
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' \
+          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' \
+          '<Default Extension="xml" ContentType="application/xml"/>' \
+          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' \
+          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' \
+          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' \
+          '</Types>'
+      end
+
+      def root_rels_xml
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' \
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' \
+          '</Relationships>'
+      end
+
+      def workbook_xml
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' \
+          '<sheets><sheet name="Despiece" sheetId="1" r:id="rId1"/></sheets></workbook>'
+      end
+
+      def workbook_rels_xml
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' \
+          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' \
+          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' \
+          '</Relationships>'
+      end
+
+      def styles_xml
+        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
+          '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' \
+          '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' \
+          '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' \
+          '<borders count="1"><border/></borders>' \
+          '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' \
+          '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' \
+          '</styleSheet>'
+      end
+
+      def csv_line(values)
+        values.map { |value| csv_field(value) }.join(',')
+      end
+
+      def csv_field(value)
+        text = value.nil? ? '' : value.to_s
+        if text.include?(',') || text.include?('"') || text.include?("\n") || text.include?("\r")
+          '"' + text.gsub('"', '""') + '"'
+        else
+          text
+        end
+      end
+    end
+
+    module ZipArchiveWriter
+      module_function
+
+      def write(path, entries)
+        if zip_gem_available?
+          write_with_zip_gem(path, entries)
+        else
+          write_with_zlib(path, entries)
+        end
+      end
+
+      def zip_gem_available?
+        return @zip_gem_available unless @zip_gem_available.nil?
+
+        begin
+          require 'zip'
+          @zip_gem_available = true
+        rescue LoadError
+          @zip_gem_available = false
+        end
+
+        @zip_gem_available
+      end
+
+      def write_with_zip_gem(path, entries)
+        require 'zip'
+        File.delete(path) if File.exist?(path)
+
+        Zip::File.open(path, Zip::File::CREATE) do |zipfile|
+          entries.each do |name, content|
+            zipfile.get_output_stream(name) { |stream| stream.write(content.to_s) }
+          end
+        end
+      end
+
+      def write_with_zlib(path, entries)
+        require 'zlib'
+
+        File.open(path, 'wb') do |io|
+          offsets = []
+          entries.each do |name, content|
+            content = content.to_s
+            offsets << write_local_entry(io, name, content)
+          end
+
+          central_offset = io.tell
+          entries.each_with_index do |(name, content), index|
+            write_central_entry(io, name, content.to_s, offsets[index])
+          end
+
+          central_size = io.tell - central_offset
+          write_end_of_central_directory(io, entries.length, central_size, central_offset)
+        end
+      end
+
+      def write_local_entry(io, name, data)
+        offset = io.tell
+        name_bytes = name.to_s.encode('UTF-8')
+        crc = Zlib.crc32(data)
+        size = data.bytesize
+        io.write([0x04034b50, 20, 0, 0, 0, 0, crc, size, size, name_bytes.bytesize, 0].pack('VvvvvvVVvv'))
+        io.write(name_bytes)
+        io.write(data)
+        offset
+      end
+
+      def write_central_entry(io, name, data, offset)
+        name_bytes = name.to_s.encode('UTF-8')
+        crc = Zlib.crc32(data)
+        size = data.bytesize
+        io.write([0x02014b50, 20, 20, 0, 0, 0, 0, crc, size, size, name_bytes.bytesize, 0, 0, 0, 0, 0, offset].pack('VvvvvvvVVvvvvVVV'))
+        io.write(name_bytes)
+      end
+
+      def write_end_of_central_directory(io, count, central_size, central_offset)
+        io.write([0x06054b50, 0, 0, count, count, central_size, central_offset, 0].pack('VvvvvVVv'))
+      end
+    end
+
     class ExcelExporter
       @last_error = nil
 
@@ -335,121 +573,82 @@ module BiraEstudio
             return
           end
 
-          path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
-          return unless path
+          if xlsx_export_available?
+            path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
+            return unless path
 
-          path = normalize_xlsx_path(path)
-
-          if write_file(path)
-            Sketchup.status_text = "Excel exportado: #{path}"
+            path = normalize_extension(path, '.xlsx')
+            if write_xlsx(path)
+              Sketchup.status_text = "Excel exportado: #{path}"
+            else
+              show_export_error
+            end
           else
-            detail = last_error.to_s.strip
-            detail = 'Error desconocido.' if detail.empty?
-            UI.messagebox("No se pudo exportar el Excel.\n\n#{detail}")
+            path = UI.savepanel('Guardar CSV', '', 'despiece.csv')
+            return unless path
+
+            path = normalize_extension(path, '.csv')
+            if write_csv(path)
+              Sketchup.status_text = "CSV exportado: #{path}"
+            else
+              show_export_error
+            end
           end
         end
 
-        def normalize_xlsx_path(path)
+        def xlsx_export_available?
+          ZipArchiveWriter.zip_gem_available? || zlib_available?
+        rescue StandardError
+          false
+        end
+
+        def zlib_available?
+          require 'zlib'
+          true
+        rescue LoadError
+          false
+        end
+
+        def normalize_extension(path, extension)
           path = path.to_s
-          return path if path.downcase.end_with?('.xlsx')
+          return path if path.downcase.end_with?(extension)
 
-          path + '.xlsx'
+          path + extension
         end
 
-        def write_file(path)
-          run_python_exporter(path)
-        end
-
-        def run_python_exporter(xlsx_path)
+        def write_xlsx(path)
           @last_error = nil
-          python = find_python_executable
-          unless python
-            @last_error = 'Python no encontrado en PATH.'
-            return false
-          end
+          rows = SpreadsheetExport.build_rows
+          entries = SpreadsheetExport.xlsx_entries(rows)
+          ZipArchiveWriter.write(path, entries)
 
-          script = File.join(PLUGIN_DIR, 'export_excel.py')
-          unless File.exist?(script)
-            @last_error = "No se encontro el script: #{script}"
-            return false
-          end
-
-          json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{Time.now.to_i}_#{rand(1000)}.json")
-          File.open(json_path, 'wb') do |handle|
-            handle.write(JSON.generate(Store.export_payload))
-          end
-
-          command = quote_command(python, script, xlsx_path, json_path)
-          output = run_shell_command(command)
-          File.delete(json_path) if File.exist?(json_path)
-
-          if File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
-            true
-          else
-            detail = output.to_s.strip
-            detail = 'El script no genero el archivo Excel.' if detail.empty?
-            @last_error = detail
-            false
-          end
+          File.exist?(path) && File.size?(path).to_i > 0
         rescue StandardError => e
           @last_error = "#{e.class}: #{e.message}"
           false
         end
 
-        def quote_command(*parts)
-          parts.map { |part| "\"#{part.to_s.gsub('"', '\\"')}\"" }.join(' ')
-        end
+        def write_csv(path)
+          @last_error = nil
+          rows = SpreadsheetExport.build_rows
+          content = rows.map { |row| SpreadsheetExport.csv_line(row) }.join("\r\n")
+          bom = "\xEF\xBB\xBF"
 
-        def run_shell_command(command)
-          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
-            `cmd.exe /c #{command} 2>&1`
-          else
-            `#{command} 2>&1`
-          end
-        end
-
-        def find_python_executable
-          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
-            resolve_python_via_launcher('py -3') ||
-              resolve_python_via_launcher('py') ||
-              resolve_python_via_launcher('python') ||
-              find_python_in_path(%w[python.exe py.exe])
-          else
-            resolve_python_via_launcher('python3') ||
-              resolve_python_via_launcher('python') ||
-              find_python_in_path(%w[python3 python])
-          end
-        end
-
-        def resolve_python_via_launcher(command)
-          output = run_shell_command("#{command} -c \"import sys; print(sys.executable)\"")
-          candidate = output.to_s.strip.split(/\r?\n/).last.to_s.strip
-          return candidate if valid_python_executable?(candidate)
-
-          nil
-        end
-
-        def find_python_in_path(binaries)
-          binaries.each do |binary|
-            output = run_shell_command("where.exe #{binary}")
-            output.to_s.strip.split(/\r?\n/).each do |line|
-              candidate = line.to_s.strip
-              next if candidate.empty?
-
-              return candidate if valid_python_executable?(candidate)
-            end
+          File.open(path, 'wb') do |handle|
+            handle.write(bom)
+            handle.write(content)
           end
 
-          nil
+          File.exist?(path) && File.size?(path).to_i > 0
+        rescue StandardError => e
+          @last_error = "#{e.class}: #{e.message}"
+          false
         end
 
-        def valid_python_executable?(path)
-          return false if path.nil? || path.empty?
-          return false unless File.exist?(path)
-          return false if path.downcase.include?('windowsapps')
-
-          output = run_shell_command("\"#{path}\" -c \"import openpyxl\"")
-          output.to_s.strip.empty?
+        def show_export_error
+          detail = last_error.to_s.strip
+          detail = 'Error desconocido.' if detail.empty?
+          UI.messagebox("No se pudo exportar el archivo.\n\n#{detail}")
         end
       end
     end
