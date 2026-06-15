@@ -577,44 +577,27 @@ module BiraEstudio
 
         container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
         pieces = []
-        direct_groups = collect_direct_groups(container)
+        direct_groups = []
+
+        container.each do |child|
+          direct_groups << child if child.is_a?(Sketchup::Group)
+        end
 
         direct_groups.each do |group|
           pieces << group if group_has_faces?(group)
         end
 
         direct_groups.each do |group|
-          next unless group_is_container?(group)
+          next if group_has_faces?(group)
+          next unless group_has_subgroups?(group)
 
-          collect_pieces_from_container(group.entities, pieces)
+          pieces.concat(collect_pieces(group))
         end
 
         pieces
       end
 
-      def collect_direct_groups(entities)
-        groups = []
-        entities.each do |child|
-          groups << child if child.is_a?(Sketchup::Group)
-        end
-        groups
-      end
-
-      def collect_pieces_from_container(entities, pieces)
-        child_groups = collect_direct_groups(entities)
-
-        child_groups.each do |group|
-          pieces << group if group_has_faces?(group)
-        end
-
-        child_groups.each do |group|
-          next unless group_is_container?(group)
-
-          collect_pieces_from_container(group.entities, pieces)
-        end
-      end
-
-      def group_is_container?(group)
+      def group_has_subgroups?(group)
         group.entities.any? { |entity| entity.is_a?(Sketchup::Group) }
       end
 
