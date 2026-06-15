@@ -133,10 +133,13 @@ module BiraEstudio
             '<div class="module-separator">-</div>' +
             '<div class="module-name">' + name + '</div>' +
             '</div>' +
-            '<div class="module-pieces">Piezas: ' + piece_total.to_s + '</div>' +
             '<button class="edit-btn">✎</button>' +
             '</div>' +
             piece_rows +
+            '<div class="module-pieces-row">' +
+            '<button class="delete-btn">🗑</button>' +
+            '<div class="module-pieces">Piezas: ' + piece_total.to_s + '</div>' +
+            '</div>' +
             '</div>'
         end
 
@@ -179,6 +182,22 @@ module BiraEstudio
 
           @scanned_ids << entity_id
           @scanned_entities << entity
+        end
+
+        def remove_module(entity_id)
+          entity_id = entity_id.to_i
+          entry = find_module_by_entity_id(entity_id)
+          return unless entry
+
+          @modules.delete(entry)
+          @scanned_ids.delete(entity_id)
+          @scanned_entities.delete_if do |entity|
+            !entity.valid? || entity.entityID == entity_id
+          end
+
+          model = Sketchup.active_model
+          view = model.active_view if model
+          view.invalidate if view
         end
 
         def clear!
@@ -321,6 +340,11 @@ module BiraEstudio
             refresh
           end
 
+          dialog.add_action_callback('remove_module') do |_context, entity_id|
+            Store.remove_module(entity_id)
+            refresh
+          end
+
           dialog.set_on_closed do
             @dialog = nil
           end
@@ -419,8 +443,7 @@ module BiraEstudio
 
         total = 0
         grouped.each { |piece| total += piece[:count] }
-        Sketchup.status_text = "Modulo escaneado: #{module_name} (#{total} piezas)"
-        UI.messagebox("Modulo escaneado: #{module_name}\n#{total} piezas agregadas a la lista")
+        Sketchup.status_text = "Modulo escaneado: #{module_name} - #{total} piezas agregadas a la lista"
       end
 
       def find_module_entity(path)
