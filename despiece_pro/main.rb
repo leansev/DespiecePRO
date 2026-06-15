@@ -96,11 +96,20 @@ module BiraEstudio
           entry[:badge_color] || DEFAULT_BADGE_COLOR
         end
 
+        def module_piece_count(entry)
+          count = 0
+          entry[:pieces].each do |piece|
+            count += piece[:count]
+          end
+          count
+        end
+
         def render_module_block(entry)
           entity_id = entry[:entity_id]
           acronym = module_acronym(entry[:name])
           color = escape_html(module_badge_color(entry))
           name = escape_html(entry[:name])
+          piece_total = module_piece_count(entry)
 
           piece_rows = entry[:pieces].map do |piece|
             dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
@@ -119,10 +128,13 @@ module BiraEstudio
 
           '<div class="module" data-entity-id="' + entity_id.to_s + '">' +
             '<div class="module-header">' +
+            '<div class="module-header-left">' +
             '<div class="module-code" style="color:' + color + ';">' + escape_html(acronym) + '</div>' +
             '<div class="module-separator">-</div>' +
             '<div class="module-name">' + name + '</div>' +
-            '<button class="edit-btn">🖉</button>' +
+            '</div>' +
+            '<div class="module-pieces">Piezas: ' + piece_total.to_s + '</div>' +
+            '<button class="edit-btn">✎</button>' +
             '</div>' +
             piece_rows +
             '</div>'
