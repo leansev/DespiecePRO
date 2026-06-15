@@ -366,7 +366,9 @@ module BiraEstudio
         def write_csv(path)
           @last_error = nil
           content = build_csv_content
-          File.write(path, BOM + content)
+          File.open(path, 'wb') do |handle|
+            handle.write(BOM + content)
+          end
 
           File.exist?(path) && File.size?(path).to_i > 0
         rescue StandardError => e
@@ -380,9 +382,7 @@ module BiraEstudio
           Store.export_payload['rows'].each do |item|
             case item['type']
             when 'module', 'total'
-              row = [item['label'].to_s]
-              (HEADERS.length - 1).times { row << '' }
-              rows << row
+              rows << [item['label'].to_s]
             when 'piece'
               rows << [
                 item['cantidad'],
@@ -398,11 +398,15 @@ module BiraEstudio
             end
           end
 
-          rows.map { |row| csv_line(row) }.join("\r\n")
+          rows.map { |row| csv_line(row) }.join("\n")
         end
 
         def csv_line(values)
-          values.map { |value| csv_field(value) }.join(SEPARATOR)
+          line = []
+          HEADERS.length.times do |index|
+            line << csv_field(values[index])
+          end
+          line.join(SEPARATOR)
         end
 
         def csv_field(value)
