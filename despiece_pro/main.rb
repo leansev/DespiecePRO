@@ -323,7 +323,7 @@ module BiraEstudio
       end
     end
 
-    module SpreadsheetExport
+    class ExcelExporter
       HEADERS = [
         'cantidad',
         'LARGO',
@@ -335,233 +335,9 @@ module BiraEstudio
         'canto_izq',
         'canto_der'
       ].freeze
+      BOM = "\xEF\xBB\xBF".freeze
+      SEPARATOR = ';'.freeze
 
-      module_function
-
-      def build_rows
-        rows = [HEADERS.dup]
-
-        Store.export_payload['rows'].each do |item|
-          case item['type']
-          when 'module', 'total'
-            row = [item['label'].to_s]
-            (HEADERS.length - 1).times { row << '' }
-            rows << row
-          when 'piece'
-            rows << [
-              item['cantidad'],
-              item['largo'],
-              item['ancho'],
-              item['nombre'],
-              item['rota'],
-              item['canto_arr'],
-              item['canto_aba'],
-              item['canto_izq'],
-              item['canto_der']
-            ]
-          end
-        end
-
-        rows
-      end
-
-      def xml_escape(text)
-        text.to_s
-            .gsub('&', '&amp;')
-            .gsub('<', '&lt;')
-            .gsub('>', '&gt;')
-            .gsub('"', '&quot;')
-            .gsub("'", '&apos;')
-      end
-
-      def column_letter(index)
-        index += 1
-        letters = ''
-        while index > 0
-          index, remainder = (index - 1).divmod(26)
-          letters = (65 + remainder).chr + letters
-        end
-        letters
-      end
-
-      def numeric_cell?(value)
-        value.is_a?(Numeric) || value.to_s =~ /\A-?\d+\z/
-      end
-
-      def cell_xml(column_index, row_index, value)
-        reference = "#{column_letter(column_index)}#{row_index}"
-        if numeric_cell?(value)
-          "<c r=\"#{reference}\"><v>#{value.to_s}</v></c>"
-        else
-          text = xml_escape(value)
-          "<c r=\"#{reference}\" t=\"inlineStr\"><is><t>#{text}</t></is></c>"
-        end
-      end
-
-      def sheet_xml(rows)
-        body = rows.each_with_index.map do |row, row_index|
-          cells = row.each_with_index.map do |value, column_index|
-            next if value.nil? || value.to_s.empty?
-
-            cell_xml(column_index, row_index + 1, value)
-          end.compact.join
-
-          "<row r=\"#{row_index + 1}\">#{cells}</row>"
-        end.join
-
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' \
-          "<sheetData>#{body}</sheetData></worksheet>"
-      end
-
-      def xlsx_entries(rows)
-        {
-          '[Content_Types].xml' => content_types_xml,
-          '_rels/.rels' => root_rels_xml,
-          'xl/workbook.xml' => workbook_xml,
-          'xl/_rels/workbook.xml.rels' => workbook_rels_xml,
-          'xl/worksheets/sheet1.xml' => sheet_xml(rows),
-          'xl/styles.xml' => styles_xml
-        }
-      end
-
-      def content_types_xml
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">' \
-          '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>' \
-          '<Default Extension="xml" ContentType="application/xml"/>' \
-          '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>' \
-          '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>' \
-          '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' \
-          '</Types>'
-      end
-
-      def root_rels_xml
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' \
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>' \
-          '</Relationships>'
-      end
-
-      def workbook_xml
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">' \
-          '<sheets><sheet name="Despiece" sheetId="1" r:id="rId1"/></sheets></workbook>'
-      end
-
-      def workbook_rels_xml
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">' \
-          '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>' \
-          '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>' \
-          '</Relationships>'
-      end
-
-      def styles_xml
-        '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>' \
-          '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">' \
-          '<fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>' \
-          '<fills count="1"><fill><patternFill patternType="none"/></fill></fills>' \
-          '<borders count="1"><border/></borders>' \
-          '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>' \
-          '<cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>' \
-          '</styleSheet>'
-      end
-
-      def csv_line(values)
-        values.map { |value| csv_field(value) }.join(',')
-      end
-
-      def csv_field(value)
-        text = value.nil? ? '' : value.to_s
-        if text.include?(',') || text.include?('"') || text.include?("\n") || text.include?("\r")
-          '"' + text.gsub('"', '""') + '"'
-        else
-          text
-        end
-      end
-    end
-
-    module ZipArchiveWriter
-      module_function
-
-      def write(path, entries)
-        if zip_gem_available?
-          write_with_zip_gem(path, entries)
-        else
-          write_with_zlib(path, entries)
-        end
-      end
-
-      def zip_gem_available?
-        return @zip_gem_available unless @zip_gem_available.nil?
-
-        begin
-          require 'zip'
-          @zip_gem_available = true
-        rescue LoadError
-          @zip_gem_available = false
-        end
-
-        @zip_gem_available
-      end
-
-      def write_with_zip_gem(path, entries)
-        require 'zip'
-        File.delete(path) if File.exist?(path)
-
-        Zip::File.open(path, Zip::File::CREATE) do |zipfile|
-          entries.each do |name, content|
-            zipfile.get_output_stream(name) { |stream| stream.write(content.to_s) }
-          end
-        end
-      end
-
-      def write_with_zlib(path, entries)
-        require 'zlib'
-
-        File.open(path, 'wb') do |io|
-          offsets = []
-          entries.each do |name, content|
-            content = content.to_s
-            offsets << write_local_entry(io, name, content)
-          end
-
-          central_offset = io.tell
-          entries.each_with_index do |(name, content), index|
-            write_central_entry(io, name, content.to_s, offsets[index])
-          end
-
-          central_size = io.tell - central_offset
-          write_end_of_central_directory(io, entries.length, central_size, central_offset)
-        end
-      end
-
-      def write_local_entry(io, name, data)
-        offset = io.tell
-        name_bytes = name.to_s.encode('UTF-8')
-        crc = Zlib.crc32(data)
-        size = data.bytesize
-        io.write([0x04034b50, 20, 0, 0, 0, 0, crc, size, size, name_bytes.bytesize, 0].pack('VvvvvvVVvv'))
-        io.write(name_bytes)
-        io.write(data)
-        offset
-      end
-
-      def write_central_entry(io, name, data, offset)
-        name_bytes = name.to_s.encode('UTF-8')
-        crc = Zlib.crc32(data)
-        size = data.bytesize
-        io.write([0x02014b50, 20, 20, 0, 0, 0, 0, crc, size, size, name_bytes.bytesize, 0, 0, 0, 0, 0, offset].pack('VvvvvvvVVvvvvVVV'))
-        io.write(name_bytes)
-      end
-
-      def write_end_of_central_directory(io, count, central_size, central_offset)
-        io.write([0x06054b50, 0, 0, count, count, central_size, central_offset, 0].pack('VvvvvVVv'))
-      end
-    end
-
-    class ExcelExporter
       @last_error = nil
 
       class << self
@@ -573,71 +349,31 @@ module BiraEstudio
             return
           end
 
-          if xlsx_export_available?
-            path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
-            return unless path
+          path = UI.savepanel('Guardar despiece', '', 'despiece.csv')
+          return unless path
 
-            path = normalize_extension(path, '.xlsx')
-            if write_xlsx(path)
-              Sketchup.status_text = "Excel exportado: #{path}"
-            else
-              show_export_error
-            end
+          path = normalize_csv_path(path)
+
+          if write_csv(path)
+            Sketchup.status_text = "Despiece exportado: #{path}"
           else
-            path = UI.savepanel('Guardar CSV', '', 'despiece.csv')
-            return unless path
-
-            path = normalize_extension(path, '.csv')
-            if write_csv(path)
-              Sketchup.status_text = "CSV exportado: #{path}"
-            else
-              show_export_error
-            end
+            detail = last_error.to_s.strip
+            detail = 'Error desconocido.' if detail.empty?
+            UI.messagebox("No se pudo exportar el despiece.\n\n#{detail}")
           end
         end
 
-        def xlsx_export_available?
-          ZipArchiveWriter.zip_gem_available? || zlib_available?
-        rescue StandardError
-          false
-        end
-
-        def zlib_available?
-          require 'zlib'
-          true
-        rescue LoadError
-          false
-        end
-
-        def normalize_extension(path, extension)
+        def normalize_csv_path(path)
           path = path.to_s
-          return path if path.downcase.end_with?(extension)
+          return path if path.downcase.end_with?('.csv')
 
-          path + extension
-        end
-
-        def write_xlsx(path)
-          @last_error = nil
-          rows = SpreadsheetExport.build_rows
-          entries = SpreadsheetExport.xlsx_entries(rows)
-          ZipArchiveWriter.write(path, entries)
-
-          File.exist?(path) && File.size?(path).to_i > 0
-        rescue StandardError => e
-          @last_error = "#{e.class}: #{e.message}"
-          false
+          path + '.csv'
         end
 
         def write_csv(path)
           @last_error = nil
-          rows = SpreadsheetExport.build_rows
-          content = rows.map { |row| SpreadsheetExport.csv_line(row) }.join("\r\n")
-          bom = "\xEF\xBB\xBF"
-
-          File.open(path, 'wb') do |handle|
-            handle.write(bom)
-            handle.write(content)
-          end
+          content = build_csv_content
+          File.write(path, BOM + content)
 
           File.exist?(path) && File.size?(path).to_i > 0
         rescue StandardError => e
@@ -645,10 +381,44 @@ module BiraEstudio
           false
         end
 
-        def show_export_error
-          detail = last_error.to_s.strip
-          detail = 'Error desconocido.' if detail.empty?
-          UI.messagebox("No se pudo exportar el archivo.\n\n#{detail}")
+        def build_csv_content
+          rows = [HEADERS.dup]
+
+          Store.export_payload['rows'].each do |item|
+            case item['type']
+            when 'module', 'total'
+              row = [item['label'].to_s]
+              (HEADERS.length - 1).times { row << '' }
+              rows << row
+            when 'piece'
+              rows << [
+                item['cantidad'],
+                item['largo'],
+                item['ancho'],
+                item['nombre'],
+                item['rota'],
+                item['canto_arr'],
+                item['canto_aba'],
+                item['canto_izq'],
+                item['canto_der']
+              ]
+            end
+          end
+
+          rows.map { |row| csv_line(row) }.join("\r\n")
+        end
+
+        def csv_line(values)
+          values.map { |value| csv_field(value) }.join(SEPARATOR)
+        end
+
+        def csv_field(value)
+          text = value.nil? ? '' : value.to_s
+          if text.include?(SEPARATOR) || text.include?('"') || text.include?("\n") || text.include?("\r")
+            '"' + text.gsub('"', '""') + '"'
+          else
+            text
+          end
         end
       end
     end
