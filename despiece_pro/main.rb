@@ -295,7 +295,7 @@ module BiraEstudio
             entry[:pieces].each do |piece|
               dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
               piece_name = (entry[:piece_names] || {})[dim_key].to_s.strip
-              piece_name = 'Pieza' if piece_name.empty?
+              piece_name = export_piece_label(acronym, piece_name)
 
               rows << {
                 'type' => 'piece',
@@ -325,6 +325,15 @@ module BiraEstudio
 
         def project_export_title
           "PROYECTO: #{project_name_for_export} \u2014 #{Time.now.strftime('%d/%m/%Y')}"
+        end
+
+        def export_piece_label(acronym, piece_name)
+          label = piece_name.to_s.strip
+          label = 'Pieza' if label.empty?
+          acronym = acronym.to_s.strip
+          return label if acronym.empty?
+
+          "#{acronym} - #{label}"
         end
 
         def project_name_for_export
