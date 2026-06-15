@@ -324,16 +324,9 @@ module BiraEstudio
     end
 
     class ExcelExporter
-      HEADERS = [
-        'cantidad',
-        'LARGO',
-        'ANCHO',
-        'nombre',
-        'rota',
-        'canto_arr',
-        'canto_aba',
-        'canto_izq',
-        'canto_der'
+      HEADERS = %w[
+        cantidad LARGO ANCHO nombre rota
+        canto_arr canto_aba canto_izq canto_der
       ].freeze
       BOM = "\xEF\xBB\xBF".freeze
       SEPARATOR = ';'.freeze
