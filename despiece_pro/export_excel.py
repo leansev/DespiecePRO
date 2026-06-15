@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
-import csv
 import json
 import sys
+
+from openpyxl import Workbook
 
 HEADERS = [
     'cantidad',
@@ -34,60 +35,30 @@ def label_row(label):
     return [label] + [''] * (len(HEADERS) - 1)
 
 
-def build_matrix(rows):
-    matrix = [HEADERS]
-    for item in rows:
-        row_type = item.get('type')
-        if row_type == 'module' or row_type == 'total':
-            matrix.append(label_row(item.get('label', '')))
-        elif row_type == 'piece':
-            matrix.append(piece_row(item))
-    return matrix
-
-
-def write_csv(path, matrix):
-    with open(path, 'w', newline='', encoding='utf-8') as handle:
-        writer = csv.writer(handle, delimiter='|')
-        for row in matrix:
-            writer.writerow(row)
-
-
-def write_xlsx(path, matrix):
-    from openpyxl import Workbook
-
+def write_xlsx(output_path, payload):
     workbook = Workbook()
     sheet = workbook.active
     sheet.title = 'Despiece'
+    sheet.append(HEADERS)
 
-    for row in matrix:
-        sheet.append(row)
+    for item in payload.get('rows', []):
+        row_type = item.get('type')
+        if row_type == 'module' or row_type == 'total':
+            sheet.append(label_row(item.get('label', '')))
+        elif row_type == 'piece':
+            sheet.append(piece_row(item))
 
-    workbook.save(path)
+    workbook.save(output_path)
 
 
 def main():
-    if len(sys.argv) != 3:
-        sys.stderr.write('Uso: export_excel.py entrada.json salida.xlsx\n')
+    if len(sys.argv) != 2:
+        sys.stderr.write('Uso: export_excel.py salida.xlsx < datos.json\n')
         sys.exit(1)
 
-    json_path = sys.argv[1]
-    output_path = sys.argv[2]
-
-    with open(json_path, 'r', encoding='utf-8') as handle:
-        payload = json.load(handle)
-
-    matrix = build_matrix(payload.get('rows', []))
-
-    try:
-        write_xlsx(output_path, matrix)
-        sys.exit(0)
-    except ImportError:
-        write_csv(output_path, matrix)
-        sys.exit(0)
-    except Exception as exc:
-        sys.stderr.write('openpyxl fallo: {0}\n'.format(exc))
-        write_csv(output_path, matrix)
-        sys.exit(0)
+    output_path = sys.argv[1]
+    payload = json.load(sys.stdin)
+    write_xlsx(output_path, payload)
 
 
 if __name__ == '__main__':

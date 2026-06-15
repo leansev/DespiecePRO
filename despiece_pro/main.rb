@@ -351,32 +351,25 @@ module BiraEstudio
         end
 
         def write_file(path)
-          json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{ $$ }_#{Time.now.to_i}.json")
-
-          begin
-            File.open(json_path, 'w') do |handle|
-              handle.write(JSON.generate(Store.export_payload))
-            end
-
-            if run_python_exporter(json_path, path)
-              true
-            else
-              write_csv_fallback(path, Store.export_payload)
-            end
-          ensure
-            File.delete(json_path) if File.exist?(json_path)
-          end
+          run_python_exporter(path)
         end
 
-        def run_python_exporter(json_path, xlsx_path)
+        def run_python_exporter(xlsx_path)
           python = find_python_executable
           return false unless python
 
           script = File.join(PLUGIN_DIR, 'export_excel.py')
           return false unless File.exist?(script)
 
-          command = "\"#{python}\" \"#{script}\" \"#{json_path}\" \"#{xlsx_path}\""
-          system(command) && File.exist?(xlsx_path) && File.size?(xlsx_path)
+          json = JSON.generate(Store.export_payload)
+          command = "\"#{python}\" \"#{script}\" \"#{xlsx_path}\""
+
+          IO.popen(command, 'w') do |pipe|
+            pipe.write(json)
+          end
+
+          success = $?.success?
+          success && File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
         end
 
         def find_python_executable
@@ -394,37 +387,6 @@ module BiraEstudio
           end
 
           nil
-        end
-
-        def write_csv_fallback(path, payload)
-          require 'csv'
-
-          CSV.open(path, 'w:UTF-8', col_sep: '|') do |csv|
-            csv << %w[cantidad LARGO ANCHO nombre rota canto_arr canto_aba canto_izq canto_der]
-
-            payload['rows'].each do |row|
-              row_type = row['type']
-              if row_type == 'module' || row_type == 'total'
-                csv << [row['label']] + [''] * 8
-              elsif row_type == 'piece'
-                csv << [
-                  row['cantidad'],
-                  row['largo'],
-                  row['ancho'],
-                  row['nombre'],
-                  row['rota'],
-                  row['canto_arr'],
-                  row['canto_aba'],
-                  row['canto_izq'],
-                  row['canto_der']
-                ]
-              end
-            end
-          end
-
-          true
-        rescue StandardError
-          false
         end
       end
     end
