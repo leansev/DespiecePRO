@@ -280,9 +280,16 @@ module BiraEstudio
           rows = []
 
           @modules.each do |entry|
+            acronym = module_acronym(entry[:name])
+            label = if acronym.empty?
+                      "\u2014 #{entry[:name]} \u2014"
+                    else
+                      "\u2014 #{acronym} \u2014 #{entry[:name]}"
+                    end
+
             rows << {
               'type' => 'module',
-              'label' => "\u2014 #{entry[:name]} \u2014"
+              'label' => label
             }
 
             entry[:pieces].each do |piece|
@@ -310,7 +317,27 @@ module BiraEstudio
             'label' => "TOTAL DE PIEZAS: #{total_pieces}"
           }
 
-          { 'rows' => rows }
+          {
+            'project_title' => project_export_title,
+            'rows' => rows
+          }
+        end
+
+        def project_export_title
+          "PROYECTO: #{project_name_for_export} \u2014 #{Time.now.strftime('%d/%m/%Y')}"
+        end
+
+        def project_name_for_export
+          model = Sketchup.active_model
+          return 'Sin nombre' unless model
+
+          title = model.title.to_s.strip
+          return title unless title.empty?
+
+          path = model.path.to_s.strip
+          return 'Sin nombre' if path.empty?
+
+          File.basename(path, '.*')
         end
 
         def escape_html(text)
@@ -324,13 +351,6 @@ module BiraEstudio
     end
 
     class ExcelExporter
-      HEADERS = %w[
-        cantidad LARGO ANCHO nombre rota
-        canto_arr canto_aba canto_izq canto_der
-      ].freeze
-      BOM = "\xEF\xBB\xBF".freeze
-      SEPARATOR = ';'.freeze
-
       @last_error = nil
 
       class << self
@@ -342,80 +362,115 @@ module BiraEstudio
             return
           end
 
-          path = UI.savepanel('Guardar despiece', '', 'despiece.csv')
+          path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
           return unless path
 
-          path = normalize_csv_path(path)
+          path = normalize_xlsx_path(path)
 
-          if write_csv(path)
-            Sketchup.status_text = "Despiece exportado: #{path}"
+          if write_xlsx(path)
+            Sketchup.status_text = "Excel exportado: #{path}"
           else
             detail = last_error.to_s.strip
             detail = 'Error desconocido.' if detail.empty?
-            UI.messagebox("No se pudo exportar el despiece.\n\n#{detail}")
+            UI.messagebox("No se pudo exportar el Excel.\n\n#{detail}")
           end
         end
 
-        def normalize_csv_path(path)
+        def normalize_xlsx_path(path)
           path = path.to_s
-          return path if path.downcase.end_with?('.csv')
+          return path if path.downcase.end_with?('.xlsx')
 
-          path + '.csv'
+          path + '.xlsx'
         end
 
-        def write_csv(path)
+        def write_xlsx(xlsx_path)
           @last_error = nil
-          content = build_csv_content
-          File.open(path, 'wb') do |handle|
-            handle.write(BOM + content)
+          python = find_python_executable
+          unless python
+            @last_error = 'Python no encontrado. Instala Python 3 con openpyxl o verifica que py -3 funcione.'
+            return false
           end
 
-          File.exist?(path) && File.size?(path).to_i > 0
+          script = File.join(PLUGIN_DIR, 'export_excel.py')
+          unless File.exist?(script)
+            @last_error = "No se encontro el script: #{script}"
+            return false
+          end
+
+          json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{Time.now.to_i}_#{rand(1000)}.json")
+          File.open(json_path, 'wb') do |handle|
+            handle.write(JSON.generate(Store.export_payload))
+          end
+
+          command = quote_command(python, script, xlsx_path, json_path)
+          output = run_shell_command("cmd.exe /c #{command} 2>&1")
+          File.delete(json_path) if File.exist?(json_path)
+
+          if File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
+            true
+          else
+            detail = output.to_s.strip
+            detail = 'El script no genero el archivo Excel.' if detail.empty?
+            @last_error = detail
+            false
+          end
         rescue StandardError => e
           @last_error = "#{e.class}: #{e.message}"
           false
         end
 
-        def build_csv_content
-          rows = [HEADERS.dup]
+        def quote_command(*parts)
+          parts.map { |part| "\"#{part.to_s.gsub('"', '\\"')}\"" }.join(' ')
+        end
 
-          Store.export_payload['rows'].each do |item|
-            case item['type']
-            when 'module', 'total'
-              rows << [item['label'].to_s]
-            when 'piece'
-              rows << [
-                item['cantidad'],
-                item['largo'],
-                item['ancho'],
-                item['nombre'],
-                item['rota'],
-                item['canto_arr'],
-                item['canto_aba'],
-                item['canto_izq'],
-                item['canto_der']
-              ]
+        def run_shell_command(command)
+          `#{command}`
+        end
+
+        def find_python_executable
+          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
+            resolve_python_via_launcher('py -3') ||
+              resolve_python_via_launcher('py') ||
+              find_python_in_common_paths
+          else
+            resolve_python_via_launcher('python3') ||
+              resolve_python_via_launcher('python')
+          end
+        end
+
+        def resolve_python_via_launcher(command)
+          output = run_shell_command("cmd.exe /c #{command} -c \"import sys; print(sys.executable)\" 2>&1")
+          candidate = output.to_s.strip.split(/\r?\n/).last.to_s.strip
+          return candidate if valid_python_executable?(candidate)
+
+          nil
+        end
+
+        def find_python_in_common_paths
+          local_app = ENV['LOCALAPPDATA'].to_s
+          return nil if local_app.empty?
+
+          patterns = [
+            File.join(local_app, 'Python', 'pythoncore-*', 'python.exe'),
+            File.join(local_app, 'Programs', 'Python', 'Python*', 'python.exe')
+          ]
+
+          patterns.each do |pattern|
+            Dir.glob(pattern).each do |candidate|
+              return candidate if valid_python_executable?(candidate)
             end
           end
 
-          rows.map { |row| csv_line(row) }.join("\n")
+          nil
         end
 
-        def csv_line(values)
-          line = []
-          HEADERS.length.times do |index|
-            line << csv_field(values[index])
-          end
-          line.join(SEPARATOR)
-        end
+        def valid_python_executable?(path)
+          return false if path.nil? || path.empty?
+          return false unless File.exist?(path)
+          return false if path.downcase.include?('windowsapps')
 
-        def csv_field(value)
-          text = value.nil? ? '' : value.to_s
-          if text.include?(SEPARATOR) || text.include?('"') || text.include?("\n") || text.include?("\r")
-            '"' + text.gsub('"', '""') + '"'
-          else
-            text
-          end
+          output = run_shell_command("cmd.exe /c \"#{path}\" -c \"import openpyxl\" 2>&1")
+          output.to_s.strip.empty?
         end
       end
     end
