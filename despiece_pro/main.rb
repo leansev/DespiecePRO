@@ -430,12 +430,25 @@ module BiraEstudio
         end
 
         container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
-
         pieces = []
-        container.each do |child|
-          pieces << child if child.is_a?(Sketchup::Group)
-        end
+        collect_pieces_recursive(container, pieces)
         pieces
+      end
+
+      def collect_pieces_recursive(entities, pieces)
+        entities.each do |child|
+          next unless child.is_a?(Sketchup::Group)
+
+          if group_has_faces?(child)
+            pieces << child
+          end
+
+          collect_pieces_recursive(child.entities, pieces)
+        end
+      end
+
+      def group_has_faces?(group)
+        group.entities.any? { |entity| entity.is_a?(Sketchup::Face) }
       end
 
       def group_pieces_by_dimensions(pieces)
