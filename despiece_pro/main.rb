@@ -577,28 +577,44 @@ module BiraEstudio
 
         container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
         pieces = []
-        collect_pieces_ordered(container, pieces)
+        direct_groups = collect_direct_groups(container)
+
+        direct_groups.each do |group|
+          pieces << group if group_has_faces?(group)
+        end
+
+        direct_groups.each do |group|
+          next unless group_is_container?(group)
+
+          collect_pieces_from_container(group.entities, pieces)
+        end
+
         pieces
       end
 
-      def collect_pieces_ordered(entities, pieces)
+      def collect_direct_groups(entities)
         groups = []
         entities.each do |child|
           groups << child if child.is_a?(Sketchup::Group)
         end
+        groups
+      end
 
-        groups.each do |child|
-          pieces << child if group_has_faces?(child)
+      def collect_pieces_from_container(entities, pieces)
+        child_groups = collect_direct_groups(entities)
+
+        child_groups.each do |group|
+          pieces << group if group_has_faces?(group)
         end
 
-        groups.each do |child|
-          next unless group_has_subgroups?(child)
+        child_groups.each do |group|
+          next unless group_is_container?(group)
 
-          collect_pieces_ordered(child.entities, pieces)
+          collect_pieces_from_container(group.entities, pieces)
         end
       end
 
-      def group_has_subgroups?(group)
+      def group_is_container?(group)
         group.entities.any? { |entity| entity.is_a?(Sketchup::Group) }
       end
 
@@ -608,21 +624,25 @@ module BiraEstudio
 
       def group_pieces_by_dimensions(pieces)
         counts = {}
+        order = []
 
         pieces.each do |piece|
           begin
             dims = DimHelpers.piece_dimensions_mm(piece)
             key = [dims[:length], dims[:width], dims[:thickness]].sort { |a, b| b <=> a }
-            counts[key] ||= 0
+            unless counts.key?(key)
+              counts[key] = 0
+              order << key
+            end
             counts[key] += 1
           rescue ArgumentError
             next
           end
         end
 
-        counts.sort_by { |(length, width, thickness), _| [-length, -width, -thickness] }.map do |(length, width, thickness), count|
+        order.map do |(length, width, thickness)|
           {
-            count: count,
+            count: counts[[length, width, thickness]],
             length: length,
             width: width,
             thickness: thickness
