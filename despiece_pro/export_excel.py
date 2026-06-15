@@ -51,13 +51,21 @@ def write_xlsx(output_path, payload):
     workbook.save(output_path)
 
 
+def load_payload():
+    if len(sys.argv) >= 3:
+        with open(sys.argv[2], encoding='utf-8-sig') as handle:
+            return json.load(handle)
+
+    return json.load(sys.stdin)
+
+
 def main():
-    if len(sys.argv) != 2:
-        sys.stderr.write('Uso: export_excel.py salida.xlsx < datos.json\n')
+    if len(sys.argv) < 2:
+        sys.stderr.write('Uso: export_excel.py salida.xlsx [datos.json]\n')
         sys.exit(1)
 
     output_path = sys.argv[1]
-    payload = json.load(sys.stdin)
+    payload = load_payload()
     write_xlsx(output_path, payload)
 
 

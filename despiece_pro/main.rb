@@ -324,7 +324,11 @@ module BiraEstudio
     end
 
     class ExcelExporter
+      @last_error = nil
+
       class << self
+        attr_reader :last_error
+
         def export
           if Store.modules.empty?
             UI.messagebox('No hay modulos para exportar.')
@@ -339,7 +343,9 @@ module BiraEstudio
           if write_file(path)
             Sketchup.status_text = "Excel exportado: #{path}"
           else
-            UI.messagebox('No se pudo exportar el Excel.')
+            detail = last_error.to_s.strip
+            detail = 'Error desconocido.' if detail.empty?
+            UI.messagebox("No se pudo exportar el Excel.\n\n#{detail}")
           end
         end
 
@@ -355,38 +361,95 @@ module BiraEstudio
         end
 
         def run_python_exporter(xlsx_path)
+          @last_error = nil
           python = find_python_executable
-          return false unless python
-
-          script = File.join(PLUGIN_DIR, 'export_excel.py')
-          return false unless File.exist?(script)
-
-          json = JSON.generate(Store.export_payload)
-          command = "\"#{python}\" \"#{script}\" \"#{xlsx_path}\""
-
-          IO.popen(command, 'w') do |pipe|
-            pipe.write(json)
+          unless python
+            @last_error = 'Python no encontrado en PATH.'
+            return false
           end
 
-          success = $?.success?
-          success && File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
+          script = File.join(PLUGIN_DIR, 'export_excel.py')
+          unless File.exist?(script)
+            @last_error = "No se encontro el script: #{script}"
+            return false
+          end
+
+          json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{Time.now.to_i}_#{rand(1000)}.json")
+          File.open(json_path, 'wb') do |handle|
+            handle.write(JSON.generate(Store.export_payload))
+          end
+
+          command = quote_command(python, script, xlsx_path, json_path)
+          output = run_shell_command(command)
+          File.delete(json_path) if File.exist?(json_path)
+
+          if File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
+            true
+          else
+            detail = output.to_s.strip
+            detail = 'El script no genero el archivo Excel.' if detail.empty?
+            @last_error = detail
+            false
+          end
+        rescue StandardError => e
+          @last_error = "#{e.class}: #{e.message}"
+          false
+        end
+
+        def quote_command(*parts)
+          parts.map { |part| "\"#{part.to_s.gsub('"', '\\"')}\"" }.join(' ')
+        end
+
+        def run_shell_command(command)
+          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
+            `cmd.exe /c #{command} 2>&1`
+          else
+            `#{command} 2>&1`
+          end
         end
 
         def find_python_executable
-          commands = ['python', 'python3', 'py']
+          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
+            resolve_python_via_launcher('py -3') ||
+              resolve_python_via_launcher('py') ||
+              resolve_python_via_launcher('python') ||
+              find_python_in_path(%w[python.exe py.exe])
+          else
+            resolve_python_via_launcher('python3') ||
+              resolve_python_via_launcher('python') ||
+              find_python_in_path(%w[python3 python])
+          end
+        end
 
-          commands.each do |command|
-            if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
-              output = `where #{command} 2>nul`
-              candidate = output.to_s.strip.split(/\r?\n/).find { |line| !line.empty? }
-              return candidate if candidate
-            else
-              candidate = `which #{command} 2>/dev/null`.strip
-              return candidate unless candidate.empty?
+        def resolve_python_via_launcher(command)
+          output = run_shell_command("#{command} -c \"import sys; print(sys.executable)\"")
+          candidate = output.to_s.strip.split(/\r?\n/).last.to_s.strip
+          return candidate if valid_python_executable?(candidate)
+
+          nil
+        end
+
+        def find_python_in_path(binaries)
+          binaries.each do |binary|
+            output = run_shell_command("where.exe #{binary}")
+            output.to_s.strip.split(/\r?\n/).each do |line|
+              candidate = line.to_s.strip
+              next if candidate.empty?
+
+              return candidate if valid_python_executable?(candidate)
             end
           end
 
           nil
+        end
+
+        def valid_python_executable?(path)
+          return false if path.nil? || path.empty?
+          return false unless File.exist?(path)
+          return false if path.downcase.include?('windowsapps')
+
+          output = run_shell_command("\"#{path}\" -c \"import openpyxl\"")
+          output.to_s.strip.empty?
         end
       end
     end
@@ -566,8 +629,9 @@ module BiraEstudio
       end
 
       def module_container?(entity)
-        container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
-        container.any? { |child| child.is_a?(Sketchup::Group) }
+        child_container(entity).any? do |child|
+          child.is_a?(Sketchup::Group) || child.is_a?(Sketchup::ComponentInstance)
+        end
       end
 
       def collect_pieces(entity)
@@ -575,34 +639,93 @@ module BiraEstudio
           return []
         end
 
-        container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
         pieces = []
-        direct_groups = []
+        direct_children = direct_mdf_children(child_container(entity))
 
-        container.each do |child|
-          direct_groups << child if child.is_a?(Sketchup::Group)
+        direct_children.each do |child|
+          pieces << child if piece_entity?(child)
         end
 
-        direct_groups.each do |group|
-          pieces << group if group_has_faces?(group)
-        end
-
-        direct_groups.each do |group|
-          next if group_has_faces?(group)
-          next unless group_has_subgroups?(group)
-
-          pieces.concat(collect_pieces(group))
+        containers = direct_children.select { |child| container_entity?(child) }
+        sort_containers_for_scan(containers).each do |child|
+          pieces.concat(collect_pieces(child))
         end
 
         pieces
       end
 
-      def group_has_subgroups?(group)
-        group.entities.any? { |entity| entity.is_a?(Sketchup::Group) }
+      def child_container(entity)
+        entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
       end
 
-      def group_has_faces?(group)
-        group.entities.any? { |entity| entity.is_a?(Sketchup::Face) }
+      def direct_mdf_children(container)
+        children = []
+        container.each do |child|
+          next unless child.is_a?(Sketchup::Group) || child.is_a?(Sketchup::ComponentInstance)
+
+          children << child
+        end
+        children
+      end
+
+      def entity_children(entity)
+        child_container(entity)
+      end
+
+      def piece_entity?(entity)
+        entity_has_faces?(entity)
+      end
+
+      def container_entity?(entity)
+        !entity_has_faces?(entity) && entity_has_subgroups?(entity)
+      end
+
+      def entity_has_subgroups?(entity)
+        entity_children(entity).any? do |child|
+          child.is_a?(Sketchup::Group) || child.is_a?(Sketchup::ComponentInstance)
+        end
+      end
+
+      def entity_has_faces?(entity)
+        entity_children(entity).any? { |child| child.is_a?(Sketchup::Face) }
+      end
+
+      def sort_containers_for_scan(containers)
+        indexed = containers.each_with_index.map { |container, index| [container, index] }
+        indexed.sort do |(left, left_index), (right, right_index)|
+          left_priority = container_scan_priority(left)
+          right_priority = container_scan_priority(right)
+          if left_priority == right_priority
+            left_index <=> right_index
+          else
+            left_priority <=> right_priority
+          end
+        end.map(&:first)
+      end
+
+      def container_scan_priority(container)
+        return 0 if structure_container?(container)
+        return 1 if container_name_priority(container) <= 1
+
+        2
+      end
+
+      def structure_container?(container)
+        child_groups = []
+        entity_children(container).each do |child|
+          child_groups << child if child.is_a?(Sketchup::Group) || child.is_a?(Sketchup::ComponentInstance)
+        end
+        return false if child_groups.empty?
+
+        child_groups.all? { |child| piece_entity?(child) }
+      end
+
+      def container_name_priority(container)
+        name = container.name.to_s.downcase
+        return 0 if name.include?('estructura') || name.include?('estruct') || name.include?('cuerpo')
+        return 2 if name.include?('cajon') || name.include?('caj')
+
+        1
       end
 
       def group_pieces_by_dimensions(pieces)
