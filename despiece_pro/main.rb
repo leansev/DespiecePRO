@@ -387,7 +387,7 @@ module BiraEstudio
           @last_error = nil
           python = find_python_executable
           unless python
-            @last_error = 'Python no encontrado. Instala Python 3 con openpyxl o verifica que py -3 funcione.'
+            @last_error = 'Python no encontrado en pythoncore-*.'
             return false
           end
 
@@ -398,20 +398,20 @@ module BiraEstudio
           end
 
           json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{Time.now.to_i}_#{rand(1000)}.json")
+          json_content = JSON.generate(Store.export_payload)
           File.open(json_path, 'wb') do |handle|
-            handle.write(JSON.generate(Store.export_payload))
+            handle.write(json_content)
           end
 
-          command = quote_command(python, script, xlsx_path, json_path)
-          output = run_shell_command("cmd.exe /c #{command} 2>&1")
-          File.delete(json_path) if File.exist?(json_path)
+          command_parts = [python, script, xlsx_path, json_path]
+          command_display = command_parts.map { |part| "\"#{part}\"" }.join(' ')
+          system(*command_parts)
 
           if File.exist?(xlsx_path) && File.size?(xlsx_path).to_i > 0
+            File.delete(json_path) if File.exist?(json_path)
             true
           else
-            detail = output.to_s.strip
-            detail = 'El script no genero el archivo Excel.' if detail.empty?
-            @last_error = detail
+            @last_error = "Comando ejecutado:\n#{command_display}\n\nJSON enviado:\n#{json_content}"
             false
           end
         rescue StandardError => e
@@ -419,58 +419,21 @@ module BiraEstudio
           false
         end
 
-        def quote_command(*parts)
-          parts.map { |part| "\"#{part.to_s.gsub('"', '\\"')}\"" }.join(' ')
-        end
-
-        def run_shell_command(command)
-          `#{command}`
-        end
-
         def find_python_executable
-          if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
-            resolve_python_via_launcher('py -3') ||
-              resolve_python_via_launcher('py') ||
-              find_python_in_common_paths
-          else
-            resolve_python_via_launcher('python3') ||
-              resolve_python_via_launcher('python')
-          end
-        end
+          candidates = []
+          candidates << Dir.glob('C:/Users/Lean/AppData/Local/Python/pythoncore-*/python.exe').first
 
-        def resolve_python_via_launcher(command)
-          output = run_shell_command("cmd.exe /c #{command} -c \"import sys; print(sys.executable)\" 2>&1")
-          candidate = output.to_s.strip.split(/\r?\n/).last.to_s.strip
-          return candidate if valid_python_executable?(candidate)
-
-          nil
-        end
-
-        def find_python_in_common_paths
           local_app = ENV['LOCALAPPDATA'].to_s
-          return nil if local_app.empty?
+          unless local_app.empty?
+            candidates << Dir.glob(File.join(local_app, 'Python', 'pythoncore-*', 'python.exe')).first
+          end
 
-          patterns = [
-            File.join(local_app, 'Python', 'pythoncore-*', 'python.exe'),
-            File.join(local_app, 'Programs', 'Python', 'Python*', 'python.exe')
-          ]
-
-          patterns.each do |pattern|
-            Dir.glob(pattern).each do |candidate|
-              return candidate if valid_python_executable?(candidate)
-            end
+          candidates.compact.uniq.each do |path|
+            next if path.downcase.include?('windowsapps')
+            return path if File.exist?(path)
           end
 
           nil
-        end
-
-        def valid_python_executable?(path)
-          return false if path.nil? || path.empty?
-          return false unless File.exist?(path)
-          return false if path.downcase.include?('windowsapps')
-
-          output = run_shell_command("cmd.exe /c \"#{path}\" -c \"import openpyxl\" 2>&1")
-          output.to_s.strip.empty?
         end
       end
     end
