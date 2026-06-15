@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Despiece PRO</title>
+
+<style>
+
+html,
+body{
+    margin:0;
+    padding:0;
+    width:100%;
+    height:100%;
+    background:#1a2a4a;
+    font-family:"Segoe UI", Arial, sans-serif;
+    color:#eef3ff;
+    overflow:hidden;
+}
+
+#app{
+    width:100%;
+    height:100%;
+    background:#1a2a4a;
+    border:1px solid rgba(255,255,255,.12);
+    border-radius:12px;
+    overflow:auto;
+    box-sizing:border-box;
+}
+
+/* ==========================================
+   MÓDULOS
+========================================== */
+
+.module{
+    margin:8px 10px;
+    margin-bottom:10px;
+    border:1px solid rgba(255,255,255,.08);
+    border-radius:8px;
+    overflow:hidden;
+}
+
+.module:first-child{
+    border-top:none;
+}
+
+.module-header{
+    display:flex;
+    align-items:center;
+    padding:8px 12px;
+    min-height:34px;
+}
+
+.module-code{
+    font-size:16px;
+    font-weight:700;
+    line-height:1;
+}
+
+.module-separator{
+    margin:0 14px;
+    color:rgba(255,255,255,.85);
+    font-size:18px;
+}
+
+.module-name{
+    flex:1;
+    font-size:14px;
+    font-weight:500;
+    color:#eef3ff;
+}
+
+.edit-btn{
+    border:none;
+    background:none;
+    color:#ffffff;
+    font-size:16px;
+    cursor:pointer;
+    padding:0;
+    width:20px;
+    height:20px;
+    line-height:20px;
+    text-align:center;
+}
+
+.edit-btn:hover{
+    opacity:.9;
+}
+
+/* ==========================================
+   FILAS
+========================================== */
+
+.piece-row{
+    display:flex;
+    align-items:center;
+    gap:12px;
+    padding:6px 12px;
+    border-top:1px solid rgba(255,255,255,.08);
+    white-space:nowrap;
+}
+
+.qty{
+    font-family:Consolas, monospace;
+    font-size:14px;
+    font-weight:500;
+    width:34px;
+    flex-shrink:0;
+}
+
+.dimensions{
+    font-family:Consolas, monospace;
+    font-size:14px;
+    font-weight:500;
+    color:#f1f4fa;
+    width:clamp(150px, 42vw, 230px);
+    flex-shrink:1;
+}
+
+.badge{
+    display:inline-block;
+    min-width:28px;
+    text-align:center;
+    padding:1px 5px;
+    margin-left:12px;
+    margin-right:12px;
+    border-radius:4px;
+    border:1px solid currentColor;
+    font-size:10px;
+    font-weight:600;
+    background:rgba(255,255,255,.02);
+}
+
+.piece-name{
+    color:#dbe4f2;
+    font-size:13px;
+    font-weight:400;
+    min-width:0;
+    overflow:hidden;
+    text-overflow:ellipsis;
+}
+
+/* ==========================================
+   EDICIÓN
+========================================== */
+
+.module.editing .module-name,
+.module.editing .piece-name{
+    background:rgba(255,255,255,.08);
+    border-radius:4px;
+    padding:2px 6px;
+}
+
+[contenteditable="true"]{
+    outline:none;
+}
+
+/* ==========================================
+   FOOTER
+========================================== */
+
+.footer{
+    display:flex;
+    justify-content:space-between;
+    align-items:center;
+
+    padding:10px 14px;
+
+    border-top:1px solid rgba(255,255,255,.08);
+}
+
+.total{
+    color:#ffd54a;
+    font-size:14px;
+    font-weight:600;
+}
+
+.clear-btn{
+    background:none;
+    border:none;
+    color:#dbe4f2;
+    cursor:pointer;
+    font-size:16px;
+}
+
+.clear-btn:hover{
+    color:#ffffff;
+}
+
+
+@media (max-width:520px){
+    .module{
+        margin:6px 8px;
+    }
+
+    .module-header{
+        padding:7px 10px;
+    }
+
+    .piece-row{
+        gap:8px;
+        padding:5px 10px;
+    }
+
+    .qty{
+        width:28px;
+        font-size:13px;
+    }
+
+    .dimensions{
+        width:clamp(135px, 45vw, 190px);
+        font-size:13px;
+    }
+
+    .badge{
+        min-width:24px;
+        padding:1px 4px;
+        margin-left:8px;
+        margin-right:8px;
+        font-size:9px;
+    }
+
+    .piece-name{
+        font-size:12px;
+    }
+
+    .footer{
+        padding:9px 12px;
+    }
+
+    .clear-btn{
+        font-size:13px;
+    }
+}
+
+</style>
+</head>
+
+<body>
+
+<div id="app">
+
+    %CONTENT%
+
+    <div class="footer">
+        <div class="total">
+            TOTAL: %TOTAL% piezas
+        </div>
+
+        <button class="clear-btn" onclick="clearList();">
+            🗑 Limpiar lista
+        </button>
+    </div>
+
+</div>
+
+<script>
+
+(function(){
+
+    function findParentByClass(el, className){
+        while(el && el !== document.body){
+            if(el.classList && el.classList.contains(className)){
+                return el;
+            }
+            el = el.parentNode;
+        }
+        return null;
+    }
+
+
+    function bindClearDefaultText(module){
+
+        var names =
+            module.querySelectorAll('.module-name');
+
+        for(var i=0;i<names.length;i++){
+
+            names[i].onfocus = function(){
+
+                var editing =
+                    module.getAttribute('data-editing') === 'true';
+
+                if(!editing){
+                    return;
+                }
+
+                var text = trim(this.innerText).toLowerCase();
+
+                if(
+                    text === 'grupo sin nombre' ||
+                    text === 'grupo sin nombre.' ||
+                    text === 'sin nombre'
+                ){
+                    this.innerText = '';
+                }
+            };
+        }
+    }
+
+    function enableEdit(module){
+
+        module.setAttribute('data-editing','true');
+        module.className += ' editing';
+
+        var moduleName =
+            module.querySelector('.module-name');
+
+        if(moduleName){
+
+            moduleName.contentEditable = true;
+            moduleName.focus();
+
+            var t = trim(moduleName.innerText).toLowerCase();
+
+            if(
+                t === 'grupo sin nombre' ||
+                t === 'grupo sin nombre.' ||
+                t === 'sin nombre'
+            ){
+                moduleName.innerText = '';
+            }
+        }
+
+        var pieces =
+            module.querySelectorAll('.piece-name');
+
+        for(var i=0;i<pieces.length;i++){
+
+            pieces[i].contentEditable = true;
+        }
+    }
+
+    function disableEdit(module){
+
+        module.setAttribute('data-editing','false');
+
+        module.className =
+            module.className.replace(' editing','');
+
+        var moduleName =
+            module.querySelector('.module-name');
+
+        if(moduleName){
+
+            moduleName.contentEditable = false;
+        }
+
+        var pieces =
+            module.querySelectorAll('.piece-name');
+
+        for(var i=0;i<pieces.length;i++){
+
+            pieces[i].contentEditable = false;
+        }
+    }
+
+    function saveModule(module){
+
+        var entityId =
+            module.getAttribute('data-entity-id');
+
+        var moduleName =
+            module.querySelector('.module-name');
+
+        if(
+            window.sketchup &&
+            sketchup.update_module_name &&
+            moduleName
+        ){
+            sketchup.update_module_name(
+                entityId,
+                trim(moduleName.innerText)
+            );
+        }
+
+        var rows =
+            module.querySelectorAll('.piece-row');
+
+        for(var i=0;i<rows.length;i++){
+
+            var row = rows[i];
+
+            var dimKey =
+                row.getAttribute('data-dim-key');
+
+            var pieceName =
+                row.querySelector('.piece-name');
+
+            if(
+                window.sketchup &&
+                sketchup.update_piece_name &&
+                pieceName
+            ){
+                sketchup.update_piece_name(
+                    entityId,
+                    dimKey,
+                    trim(pieceName.innerText)
+                );
+            }
+        }
+
+        if(
+            window.sketchup &&
+            sketchup.refresh_list
+        ){
+            sketchup.refresh_list();
+        }
+    }
+
+    function trim(str){
+
+        return String(str)
+            .replace(/^\s+/,'')
+            .replace(/\s+$/,'');
+    }
+
+    window.clearList = function(){
+
+        if(
+            window.sketchup &&
+            sketchup.clear_list
+        ){
+            sketchup.clear_list();
+        }
+    };
+
+    document.addEventListener('click', function(e){
+
+        var btn = findParentByClass(e.target, 'edit-btn');
+
+        if(!btn){
+            return;
+        }
+
+        var module = findParentByClass(btn, 'module');
+
+        if(!module){
+            return;
+        }
+
+        var editing =
+            module.getAttribute('data-editing') === 'true';
+
+        if(editing){
+
+            saveModule(module);
+            disableEdit(module);
+            btn.innerHTML = '🖉';
+
+        }else{
+
+            bindClearDefaultText(module);
+            enableEdit(module);
+            btn.innerHTML = '✓';
+
+        }
+
+    }, false);
+
+})();
+
+</script>
+
+</body>
+</html>
