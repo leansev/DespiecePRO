@@ -8,6 +8,7 @@ def build_rbz():
         ('despiece_pro.rb', 'despiece_pro.rb'),
         ('despiece_pro/main.rb', 'despiece_pro/main.rb'),
         ('despiece_pro/dialog.html', 'despiece_pro/dialog.html'),
+        ('despiece_pro/export_excel.py', 'despiece_pro/export_excel.py'),
         ('despiece_pro/icons/scan_small.png', 'despiece_pro/icons/scan_small.png'),
         ('despiece_pro/icons/scan_large.png', 'despiece_pro/icons/scan_large.png'),
         ('despiece_pro/icons/list_small.png', 'despiece_pro/icons/list_small.png'),

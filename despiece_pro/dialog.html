@@ -216,6 +216,21 @@ body{
     font-weight:600;
 }
 
+.export-btn{
+    background:none;
+    border:1px solid rgba(255,255,255,.25);
+    color:#dbe4f2;
+    cursor:pointer;
+    font-size:13px;
+    padding:4px 10px;
+    border-radius:4px;
+}
+
+.export-btn:hover{
+    color:#ffffff;
+    border-color:rgba(255,255,255,.45);
+}
+
 
 @media (max-width:520px){
     .module{
@@ -271,6 +286,9 @@ body{
         <div class="total">
             TOTAL: %TOTAL% piezas
         </div>
+        <button class="export-btn" onclick="exportExcel();">
+            Exportar Excel
+        </button>
     </div>
 
 </div>
@@ -443,6 +461,16 @@ body{
             sketchup.clear_list
         ){
             sketchup.clear_list();
+        }
+    };
+
+    window.exportExcel = function(){
+
+        if(
+            window.sketchup &&
+            sketchup.export_excel
+        ){
+            sketchup.export_excel();
         }
     };
 

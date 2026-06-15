@@ -1,6 +1,8 @@
 # despiece_pro/main.rb
 # Logica principal del plugin Despiece PRO
 
+require 'json'
+
 module BiraEstudio
   module DespiecePro
     PLUGIN_DIR = File.expand_path(File.dirname(__FILE__)).freeze
@@ -274,12 +276,155 @@ module BiraEstudio
           '<div class="empty">Lista vacia. Escanea un modulo para comenzar.</div>'
         end
 
+        def export_payload
+          rows = []
+
+          @modules.each do |entry|
+            rows << {
+              'type' => 'module',
+              'label' => "\u2014 #{entry[:name]} \u2014"
+            }
+
+            entry[:pieces].each do |piece|
+              dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
+              piece_name = (entry[:piece_names] || {})[dim_key].to_s.strip
+              piece_name = 'Pieza' if piece_name.empty?
+
+              rows << {
+                'type' => 'piece',
+                'cantidad' => piece[:count],
+                'largo' => piece[:length],
+                'ancho' => piece[:width],
+                'nombre' => piece_name,
+                'rota' => 1,
+                'canto_arr' => 0,
+                'canto_aba' => 0,
+                'canto_izq' => 0,
+                'canto_der' => 0
+              }
+            end
+          end
+
+          rows << {
+            'type' => 'total',
+            'label' => "TOTAL DE PIEZAS: #{total_pieces}"
+          }
+
+          { 'rows' => rows }
+        end
+
         def escape_html(text)
           text.to_s
               .gsub('&', '&amp;')
               .gsub('<', '&lt;')
               .gsub('>', '&gt;')
               .gsub('"', '&quot;')
+        end
+      end
+    end
+
+    class ExcelExporter
+      class << self
+        def export
+          if Store.modules.empty?
+            UI.messagebox('No hay modulos para exportar.')
+            return
+          end
+
+          path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
+          return unless path
+
+          path = normalize_xlsx_path(path)
+
+          if write_file(path)
+            Sketchup.status_text = "Excel exportado: #{path}"
+          else
+            UI.messagebox('No se pudo exportar el Excel.')
+          end
+        end
+
+        def normalize_xlsx_path(path)
+          path = path.to_s
+          return path if path.downcase.end_with?('.xlsx')
+
+          path + '.xlsx'
+        end
+
+        def write_file(path)
+          json_path = File.join(Dir.tmpdir, "despiece_pro_export_#{ $$ }_#{Time.now.to_i}.json")
+
+          begin
+            File.open(json_path, 'w') do |handle|
+              handle.write(JSON.generate(Store.export_payload))
+            end
+
+            if run_python_exporter(json_path, path)
+              true
+            else
+              write_csv_fallback(path, Store.export_payload)
+            end
+          ensure
+            File.delete(json_path) if File.exist?(json_path)
+          end
+        end
+
+        def run_python_exporter(json_path, xlsx_path)
+          python = find_python_executable
+          return false unless python
+
+          script = File.join(PLUGIN_DIR, 'export_excel.py')
+          return false unless File.exist?(script)
+
+          command = "\"#{python}\" \"#{script}\" \"#{json_path}\" \"#{xlsx_path}\""
+          system(command) && File.exist?(xlsx_path) && File.size?(xlsx_path)
+        end
+
+        def find_python_executable
+          commands = ['python', 'python3', 'py']
+
+          commands.each do |command|
+            if RUBY_PLATFORM =~ /mswin|mingw|cygwin/i
+              output = `where #{command} 2>nul`
+              candidate = output.to_s.strip.split(/\r?\n/).find { |line| !line.empty? }
+              return candidate if candidate
+            else
+              candidate = `which #{command} 2>/dev/null`.strip
+              return candidate unless candidate.empty?
+            end
+          end
+
+          nil
+        end
+
+        def write_csv_fallback(path, payload)
+          require 'csv'
+
+          CSV.open(path, 'w:UTF-8', col_sep: '|') do |csv|
+            csv << %w[cantidad LARGO ANCHO nombre rota canto_arr canto_aba canto_izq canto_der]
+
+            payload['rows'].each do |row|
+              row_type = row['type']
+              if row_type == 'module' || row_type == 'total'
+                csv << [row['label']] + [''] * 8
+              elsif row_type == 'piece'
+                csv << [
+                  row['cantidad'],
+                  row['largo'],
+                  row['ancho'],
+                  row['nombre'],
+                  row['rota'],
+                  row['canto_arr'],
+                  row['canto_aba'],
+                  row['canto_izq'],
+                  row['canto_der']
+                ]
+              end
+            end
+          end
+
+          true
+        rescue StandardError
+          false
         end
       end
     end
@@ -343,6 +488,10 @@ module BiraEstudio
           dialog.add_action_callback('remove_module') do |_context, entity_id|
             Store.remove_module(entity_id)
             refresh
+          end
+
+          dialog.add_action_callback('export_excel') do |_context|
+            ExcelExporter.export
           end
 
           dialog.set_on_closed do
