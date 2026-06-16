@@ -28,6 +28,26 @@ body{
     box-sizing:border-box;
 }
 
+.top-bar {
+  display: flex;
+  gap: 8px;
+  padding: 10px 10px 0 10px;
+}
+.top-bar-btn {
+  flex: 1;
+  padding: 8px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.15);
+  border-radius: 6px;
+  color: #eef3ff;
+  font-size: 13px;
+  cursor: pointer;
+  text-align: center;
+}
+.top-bar-btn:hover {
+  background: rgba(255,255,255,0.14);
+}
+
 /* ==========================================
    MÓDULOS
 ========================================== */
@@ -323,6 +343,11 @@ body{
 
 <div id="app">
 
+    <div class="top-bar">
+      <button class="top-bar-btn" onclick="refreshAll();">🔄 Refresh</button>
+      <button class="top-bar-btn" onclick="openInfo();">ℹ Info Placas</button>
+    </div>
+
     %CONTENT%
 
     <div class="footer">
@@ -335,10 +360,6 @@ body{
             </button>
             <button class="export-btn" onclick="saveState();">
                 💾 Guardar
-            </button>
-            <button class="export-btn" onclick="openInfo();"> Info placas</button>
-            <button class="export-btn" onclick="refreshAll();">
-                🔄 Refresh
             </button>
         </div>
     </div>
