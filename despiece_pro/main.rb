@@ -752,6 +752,23 @@ module BiraEstudio
 
           path = normalize_xlsx_path(path)
 
+          sin_nombre = []
+          Store.modules.each do |entry|
+            entry[:pieces].each do |piece|
+              color = piece[:color].to_s.strip.upcase
+              next if color.empty? || color == '#FFFFFF'
+              next unless Store.color_name(color).to_s.strip.empty?
+
+              sin_nombre << color unless sin_nombre.include?(color)
+            end
+          end
+
+          unless sin_nombre.empty?
+            UI.messagebox("Los siguientes colores no tienen nombre configurado:\n#{sin_nombre.join(', ')}\n\nConfiguralos en Info placas antes de exportar.")
+            InfoDialog.show
+            return
+          end
+
           if write_xlsx(path)
             Sketchup.status_text = "Excel exportado: #{path}"
           else
