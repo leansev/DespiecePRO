@@ -1082,12 +1082,31 @@ module BiraEstudio
         def apply_list_html
           if @dialog && @dialog.visible?
             begin
-              @dialog.execute_script("window.__scrollTop = document.getElementById('app') ? document.getElementById('app').scrollTop : 0;")
+              @dialog.execute_script(
+                "window.__scrollTop = document.getElementById('app') ? document.getElementById('app').scrollTop : 0;" \
+                "window.__openModules = [];" \
+                "document.querySelectorAll('.module.open').forEach(function(m){ window.__openModules.push(m.getAttribute('data-entity-id')); });"
+              )
             rescue StandardError
               nil
             end
           end
           @dialog.set_html(dialog_body_html)
+          if @dialog && @dialog.visible?
+            begin
+              @dialog.execute_script(
+                "var ids = window.__openModules || [];" \
+                "ids.forEach(function(id){" \
+                "  var m = document.querySelector('.module[data-entity-id=\"' + id + '\"]');" \
+                "  if(m){ m.classList.add('open'); }" \
+                "});" \
+                "var app = document.getElementById('app');" \
+                "if(app && window.__scrollTop){ app.scrollTop = window.__scrollTop; }"
+              )
+            rescue StandardError
+              nil
+            end
+          end
         end
 
         def build_dialog
@@ -1413,7 +1432,11 @@ module BiraEstudio
       toolbar.add_item(cmd_list)
       menu.add_item(cmd_list)
 
-      toolbar.restore
+      if toolbar.get_last_state == TB_HIDDEN
+        toolbar.show
+      else
+        toolbar.restore
+      end
       Store.restore_from_model(Sketchup.active_model)
       file_loaded(__FILE__)
     end
