@@ -327,6 +327,7 @@ body{
             <button class="export-btn" onclick="saveState();">
                 💾 Guardar
             </button>
+            <button class="export-btn" onclick="openInfo();"> Info placas</button>
         </div>
     </div>
 
@@ -607,6 +608,12 @@ body{
             sketchup.save_state
         ){
             sketchup.save_state();
+        }
+    };
+
+    window.openInfo = function(){
+        if(window.sketchup && sketchup.open_info){
+            sketchup.open_info();
         }
     };
 

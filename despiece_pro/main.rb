@@ -50,6 +50,7 @@ module BiraEstudio
       @modules = []
       @scanned_uids = []
       @scanned_entities = []
+      @color_names = {}
       SCAN_MATERIAL_NAME = 'DespiecePRO_escaneado'.freeze
       DEFAULT_BADGE_COLOR = '#ff941f'.freeze
       ATTRIBUTE_DICT = 'despiece_pro'.freeze
@@ -118,6 +119,64 @@ module BiraEstudio
           return '#1d35ff' if v == 2
 
           'rgba(255,255,255,.25)'
+        end
+
+        def color_name(hex)
+          hex = hex.to_s.strip.upcase
+          hex = '#FFFFFF' if hex.empty?
+          return 'Blanco' if hex == '#FFFFFF'
+
+          (@color_names || {})[hex].to_s
+        end
+
+        def set_color_name(hex, name)
+          hex = hex.to_s.strip.upcase
+          hex = '#FFFFFF' if hex.empty?
+          return if hex == '#FFFFFF'
+
+          @color_names ||= {}
+          name = name.to_s.strip
+          if name.empty?
+            @color_names.delete(hex)
+          else
+            @color_names[hex] = name
+          end
+        end
+
+        def placas_list
+          totals = {}
+          order = []
+
+          @modules.each do |entry|
+            entry[:pieces].each do |piece|
+              color = piece[:color].to_s.strip.upcase
+              color = '#FFFFFF' if color.empty?
+              thickness = piece[:thickness].to_i
+              key = [thickness, color]
+              unless totals.key?(key)
+                totals[key] = 0
+                order << key
+              end
+              totals[key] += piece[:count].to_i
+            end
+          end
+
+          order.sort! do |a, b|
+            if a[0] == b[0]
+              a[1] <=> b[1]
+            else
+              b[0] <=> a[0]
+            end
+          end
+
+          order.map do |thickness, color|
+            {
+              thickness: thickness,
+              color: color,
+              name: color_name(color),
+              piece_count: totals[[thickness, color]]
+            }
+          end
         end
 
         def update_module_badge_color(uid, color)
@@ -260,6 +319,7 @@ module BiraEstudio
           @modules.clear
           @scanned_uids.clear
           @scanned_entities.clear
+          @color_names = {}
         end
 
         def entity_uid(entity)
@@ -328,6 +388,7 @@ module BiraEstudio
 
           data = parse_saved_state(raw)
           reset_state!
+          @color_names = normalize_hash(data['color_names'] || {})
 
           modules_data = data['modules']
           unless modules_data.is_a?(Array)
@@ -418,7 +479,10 @@ module BiraEstudio
             }
           end
 
-          JSON.generate('modules' => modules_data)
+          JSON.generate(
+            'modules' => modules_data,
+            'color_names' => @color_names || {}
+          )
         end
 
         def deserialize_pieces(pieces_data)
@@ -732,6 +796,74 @@ module BiraEstudio
       end
     end
 
+    class InfoDialog
+      DIALOG_KEY = 'despiece_pro_info'.freeze
+
+      class << self
+        def show
+          @dialog ||= build_dialog
+          @dialog.set_html(dialog_body_html)
+          @dialog.show
+        end
+
+        def build_dialog
+          dialog = UI::HtmlDialog.new(
+            dialog_title: 'Info de placas',
+            preferences_key: DIALOG_KEY,
+            scrollable: false,
+            resizable: true,
+            width: 420,
+            height: 480,
+            style: UI::HtmlDialog::STYLE_DIALOG
+          )
+
+          dialog.add_action_callback('update_color_name') do |_context, hex, name|
+            Store.set_color_name(hex, name)
+            Store.save_to_model(Sketchup.active_model)
+          end
+
+          dialog.set_on_closed do
+            @dialog = nil
+          end
+
+          dialog
+        end
+
+        def dialog_body_html
+          html = File.read(File.join(PLUGIN_DIR, 'info_dialog.html'))
+          html.gsub('%FILAS%', render_placa_rows)
+        end
+
+        def render_placa_rows
+          placas = Store.placas_list
+          return '<div class="empty-placas">Sin placas detectadas.</div>' if placas.empty?
+
+          placas.map do |placa|
+            hex = Store.escape_html(placa[:color])
+            is_white = placa[:color].to_s.upcase == '#FFFFFF'
+            label = 'Placa ' + placa[:thickness].to_s + 'mm'
+            count_text = placa[:piece_count].to_s + ' piezas'
+
+            if is_white
+              name_input = '<input type="text" class="name-input" value="Blanco" disabled data-hex="' + hex + '">'
+            else
+              name_value = Store.escape_html(placa[:name])
+              name_input = '<input type="text" class="name-input" value="' + name_value + '" data-hex="' + hex + '" placeholder="Nombre de color">'
+            end
+
+            '<div class="placa-row">' +
+              '<div class="color-box" style="background:' + hex + ';"></div>' +
+              '<div class="placa-info">' +
+              '<div class="placa-label">' + Store.escape_html(label) + '</div>' +
+              '<div class="placa-count">' + Store.escape_html(count_text) + '</div>' +
+              '</div>' +
+              '<div class="placa-name">' + name_input + '</div>' +
+              '</div>'
+          end.join('')
+        end
+      end
+    end
+
     class ListDialog
       DIALOG_KEY = 'despiece_pro_list'.freeze
 
@@ -805,6 +937,10 @@ module BiraEstudio
 
           dialog.add_action_callback('open_extra') do |_context, uid, dim_key|
             ExtraDialog.show(uid, dim_key)
+          end
+
+          dialog.add_action_callback('open_info') do |_context|
+            InfoDialog.show
           end
 
           dialog.set_on_closed do
