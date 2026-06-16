@@ -40,7 +40,7 @@ module BiraEstudio
 
     class Store
       @modules = []
-      @scanned_ids = []
+      @scanned_guids = []
       @scanned_entities = []
       SCAN_MATERIAL_NAME = 'DespiecePRO_escaneado'.freeze
       DEFAULT_BADGE_COLOR = '#ff941f'.freeze
@@ -50,23 +50,23 @@ module BiraEstudio
       class << self
         attr_reader :modules, :scanned_entities
 
-        def add_module(name, pieces, entity_id)
+        def add_module(name, pieces, guid)
           @modules << {
             name: name,
-            entity_id: entity_id,
+            guid: guid.to_s,
             pieces: pieces,
             piece_names: {},
             badge_color: DEFAULT_BADGE_COLOR
           }
         end
 
-        def find_module_by_entity_id(entity_id)
-          entity_id = entity_id.to_i
-          @modules.find { |entry| entry[:entity_id] == entity_id }
+        def find_module_by_guid(guid)
+          guid = guid.to_s
+          @modules.find { |entry| entry[:guid].to_s == guid }
         end
 
-        def update_module_name(entity_id, name)
-          entry = find_module_by_entity_id(entity_id)
+        def update_module_name(guid, name)
+          entry = find_module_by_guid(guid)
           return unless entry
 
           name = name.to_s.strip
@@ -74,8 +74,8 @@ module BiraEstudio
           entry[:name] = name
         end
 
-        def update_piece_name(entity_id, dim_key, name)
-          entry = find_module_by_entity_id(entity_id)
+        def update_piece_name(guid, dim_key, name)
+          entry = find_module_by_guid(guid)
           return unless entry
 
           entry[:piece_names] ||= {}
@@ -87,8 +87,8 @@ module BiraEstudio
           end
         end
 
-        def update_module_badge_color(entity_id, color)
-          entry = find_module_by_entity_id(entity_id)
+        def update_module_badge_color(guid, color)
+          entry = find_module_by_guid(guid)
           return unless entry
 
           color = color.to_s.strip
@@ -109,7 +109,7 @@ module BiraEstudio
         end
 
         def render_module_block(entry)
-          entity_id = entry[:entity_id]
+          guid = entry[:guid]
           acronym = module_acronym(entry[:name])
           color = escape_html(module_badge_color(entry))
           name = escape_html(entry[:name])
@@ -130,7 +130,7 @@ module BiraEstudio
             )
           end.join('')
 
-          '<div class="module" data-entity-id="' + entity_id.to_s + '">' +
+          '<div class="module" data-entity-id="' + escape_html(guid.to_s) + '">' +
             '<div class="module-header">' +
             '<div class="module-header-left">' +
             '<div class="module-code" style="color:' + color + ';">' + escape_html(acronym) + '</div>' +
@@ -176,27 +176,28 @@ module BiraEstudio
           end
         end
 
-        def scanned?(entity_id)
-          @scanned_ids.include?(entity_id)
+        def scanned?(guid)
+          @scanned_guids.include?(guid.to_s)
         end
 
         def mark_scanned(entity)
-          entity_id = entity.entityID
-          return if @scanned_ids.include?(entity_id)
+          guid = entity_guid(entity)
+          return if guid.empty?
+          return if @scanned_guids.include?(guid)
 
-          @scanned_ids << entity_id
+          @scanned_guids << guid
           @scanned_entities << entity
         end
 
-        def remove_module(entity_id)
-          entity_id = entity_id.to_i
-          entry = find_module_by_entity_id(entity_id)
+        def remove_module(guid)
+          guid = guid.to_s
+          entry = find_module_by_guid(guid)
           return unless entry
 
           @modules.delete(entry)
-          @scanned_ids.delete(entity_id)
+          @scanned_guids.delete(guid)
           @scanned_entities.delete_if do |entity|
-            !entity.valid? || entity.entityID == entity_id
+            !entity.valid? || entity_guid(entity) == guid
           end
 
           model = Sketchup.active_model
@@ -215,8 +216,34 @@ module BiraEstudio
 
         def reset_state!
           @modules.clear
-          @scanned_ids.clear
+          @scanned_guids.clear
           @scanned_entities.clear
+        end
+
+        def entity_guid(entity)
+          return '' unless entity
+
+          guid = entity.guid
+          guid = guid.to_s.strip if guid
+          return guid unless guid.nil? || guid.empty?
+
+          ''
+        rescue StandardError
+          ''
+        end
+
+        def legacy_entity_id?(value)
+          value.to_s.strip =~ /\A\d+\z/
+        end
+
+        def resolve_module_guid(entry)
+          guid = entry['guid'].to_s.strip
+          return guid unless guid.empty?
+
+          legacy_id = entry['entity_id']
+          return legacy_id.to_s unless legacy_id.nil?
+
+          ''
         end
 
         def save_to_model(model)
@@ -251,24 +278,34 @@ module BiraEstudio
           restored_count = 0
           modules_data.each do |entry|
             entry = normalize_hash(entry)
-            entity_id = entry['entity_id'].to_i
-            pieces = deserialize_pieces(entry['pieces'])
-            if pieces.empty?
-              puts "Despiece PRO: modulo #{entity_id} descartado (sin piezas validas)"
+            guid = resolve_module_guid(entry)
+            if guid.empty?
+              puts 'Despiece PRO: modulo descartado (sin guid ni entity_id)'
               next
             end
 
-            entity = find_entity_by_id(model, entity_id)
-            if entity && entity.valid?
-              @scanned_ids << entity_id unless @scanned_ids.include?(entity_id)
-              @scanned_entities << entity unless @scanned_entities.include?(entity)
+            pieces = deserialize_pieces(entry['pieces'])
+            if pieces.empty?
+              puts "Despiece PRO: modulo #{guid} descartado (sin piezas validas)"
+              next
+            end
+
+            entity = nil
+            unless legacy_entity_id?(guid)
+              entity = find_entity_by_guid(model, guid)
+              if entity && entity.valid?
+                @scanned_guids << guid unless @scanned_guids.include?(guid)
+                @scanned_entities << entity unless @scanned_entities.include?(entity)
+              else
+                puts "Despiece PRO: guid #{guid} no encontrado, restaurando modulo igual"
+              end
             else
-              puts "Despiece PRO: entityID #{entity_id} no encontrado, restaurando modulo igual"
+              puts "Despiece PRO: modulo legacy entity_id #{guid}, restaurando solo datos"
             end
 
             @modules << {
               name: entry['name'].to_s,
-              entity_id: entity_id,
+              guid: guid,
               pieces: pieces,
               piece_names: normalize_hash(entry['piece_names'] || {}),
               badge_color: entry['badge_color'] || DEFAULT_BADGE_COLOR
@@ -307,7 +344,7 @@ module BiraEstudio
         def serialize_state
           modules_data = @modules.map do |entry|
             {
-              'entity_id' => entry[:entity_id],
+              'guid' => entry[:guid].to_s,
               'name' => entry[:name],
               'pieces' => entry[:pieces].map do |piece|
                 {
@@ -339,28 +376,24 @@ module BiraEstudio
           end
         end
 
-        def find_entity_by_id(model, entity_id)
-          entity_id = entity_id.to_i
+        def find_entity_by_guid(model, guid)
+          guid = guid.to_s.strip
+          return nil if guid.empty?
+          return nil if legacy_entity_id?(guid)
 
-          if model.respond_to?(:find_entity_by_id)
-            begin
-              entity = model.find_entity_by_id(entity_id)
-              return entity if entity && entity.valid?
-            rescue StandardError
-              # SketchUp 2017 puede no soportar find_entity_by_id de forma fiable
-            end
-          end
-
-          find_entity_by_id_recursive(model.entities, entity_id)
+          find_entity_by_guid_recursive(model.entities, guid)
         end
 
-        def find_entity_by_id_recursive(entities, entity_id)
+        def find_entity_by_guid_recursive(entities, guid)
           entities.each do |entity|
             next unless entity.valid?
-            return entity if entity.entityID == entity_id
+            return entity if entity_guid(entity) == guid
 
             if entity.is_a?(Sketchup::Group)
-              found = find_entity_by_id_recursive(entity.entities, entity_id)
+              found = find_entity_by_guid_recursive(entity.entities, guid)
+              return found if found
+            elsif entity.is_a?(Sketchup::ComponentInstance)
+              found = find_entity_by_guid_recursive(entity.definition.entities, guid)
               return found if found
             end
           end
@@ -740,7 +773,7 @@ module BiraEstudio
           return
         end
 
-        if Store.scanned?(entity.entityID)
+        if Store.scanned?(Store.entity_guid(entity))
           Sketchup.status_text = 'Este modulo ya fue escaneado'
           return
         end
@@ -761,7 +794,7 @@ module BiraEstudio
         module_name = 'Grupo sin nombre' if module_name.empty?
 
         Store.mark_scanned(entity)
-        Store.add_module(module_name, grouped, entity.entityID)
+        Store.add_module(module_name, grouped, Store.entity_guid(entity))
         ListDialog.refresh
         view.invalidate
 
