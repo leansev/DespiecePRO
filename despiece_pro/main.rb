@@ -1068,15 +1068,26 @@ module BiraEstudio
         def refresh
           return unless @dialog && @dialog.visible?
 
-          @dialog.set_html(dialog_body_html)
+          apply_list_html
         end
 
         def show
           restored = Store.restore_from_model(Sketchup.active_model)
           @dialog ||= build_dialog
-          @dialog.set_html(dialog_body_html)
+          apply_list_html
           @dialog.show
           Sketchup.status_text = "Despiece PRO: #{restored} modulos restaurados" if restored > 0
+        end
+
+        def apply_list_html
+          if @dialog && @dialog.visible?
+            begin
+              @dialog.execute_script("window.__scrollTop = document.getElementById('app') ? document.getElementById('app').scrollTop : 0;")
+            rescue StandardError
+              nil
+            end
+          end
+          @dialog.set_html(dialog_body_html)
         end
 
         def build_dialog

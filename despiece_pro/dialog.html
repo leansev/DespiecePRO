@@ -347,21 +347,14 @@ body{
 (function(){
 
     var app = document.getElementById('app');
-    var scrollTimer = null;
 
     if(app){
-        var savedScroll = sessionStorage.getItem('scrollTop');
-        if(savedScroll !== null && savedScroll !== ''){
-            app.scrollTop = parseInt(savedScroll, 10) || 0;
+        var savedScroll = window.__scrollTop || 0;
+        if(savedScroll > 0){
+            app.scrollTop = savedScroll;
         }
-
         app.addEventListener('scroll', function(){
-            if(scrollTimer){
-                clearTimeout(scrollTimer);
-            }
-            scrollTimer = setTimeout(function(){
-                sessionStorage.setItem('scrollTop', String(app.scrollTop));
-            }, 100);
+            window.__scrollTop = app.scrollTop;
         });
     }
 
