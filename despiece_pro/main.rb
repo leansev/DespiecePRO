@@ -39,8 +39,15 @@ module BiraEstudio
 
       def piece_color_hex(entity)
         mat = entity.material rescue nil
-        return '#FFFFFF' unless mat
 
+        unless mat
+          container = entity.is_a?(Sketchup::Group) ? entity.entities : entity.definition.entities
+          face = container.find { |e| e.is_a?(Sketchup::Face) }
+          mat = face.material if face
+          mat = face.back_material if face && !mat
+        end
+
+        return '#FFFFFF' unless mat
         c = mat.color
         '#%02X%02X%02X' % [c.red, c.green, c.blue]
       end
