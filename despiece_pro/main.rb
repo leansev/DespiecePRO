@@ -149,7 +149,7 @@ module BiraEstudio
           piece_total = module_piece_count(entry)
 
           piece_rows = entry[:pieces].map do |piece|
-            dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
+            dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness], piece[:color] || '#FFFFFF')
             piece_name = (entry[:piece_names] || {})[dim_key] || ''
             render_piece_row(
               piece[:count],
@@ -197,8 +197,11 @@ module BiraEstudio
             '</div>'
         end
 
-        def piece_dim_key(length, width, thickness)
-          "#{length},#{width},#{thickness}"
+        def piece_dim_key(length, width, thickness, color)
+          color = color.to_s.strip
+          color = '#FFFFFF' if color.empty?
+
+          "#{length},#{width},#{thickness},#{color}"
         end
 
         def module_acronym(name)
@@ -515,7 +518,7 @@ module BiraEstudio
             }
 
             entry[:pieces].each do |piece|
-              dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
+              dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness], piece[:color] || '#FFFFFF')
               cantos = get_piece_cantos(entry[:uid], dim_key)
               piece_name = (entry[:piece_names] || {})[dim_key].to_s.strip
               piece_name = export_piece_label(acronym, piece_name)
@@ -528,6 +531,7 @@ module BiraEstudio
                 'ancho' => piece[:width],
                 'nombre' => piece_name,
                 'rota' => 1,
+                'color' => piece[:color] || '#FFFFFF',
                 'canto_arr' => cantos[:arr],
                 'canto_aba' => cantos[:aba],
                 'canto_izq' => cantos[:izq],
@@ -673,7 +677,9 @@ module BiraEstudio
         def show(uid, dim_key)
           entry = Store.find_module_by_uid(uid)
           return unless entry
-          piece = entry[:pieces].find { |p| Store.piece_dim_key(p[:length], p[:width], p[:thickness]) == dim_key.to_s }
+          piece = entry[:pieces].find do |p|
+            Store.piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') == dim_key.to_s
+          end
           return unless piece
           piece_name = (entry[:piece_names] || {})[dim_key.to_s].to_s.strip
           piece_name = 'Pieza' if piece_name.empty?
@@ -1014,16 +1020,16 @@ module BiraEstudio
 
       def group_pieces_by_dimensions(pieces)
         counts = {}
-        colors = {}
         order = []
 
         pieces.each do |piece|
           begin
             dims = DimHelpers.piece_dimensions_mm(piece)
-            key = [dims[:length], dims[:width], dims[:thickness]].sort { |a, b| b <=> a }
+            color_hex = DimHelpers.piece_color_hex(piece)
+            sorted_dims = [dims[:length], dims[:width], dims[:thickness]].sort { |a, b| b <=> a }
+            key = sorted_dims + [color_hex]
             unless counts.key?(key)
               counts[key] = 0
-              colors[key] = DimHelpers.piece_color_hex(piece)
               order << key
             end
             counts[key] += 1
@@ -1032,14 +1038,14 @@ module BiraEstudio
           end
         end
 
-        order.map do |(length, width, thickness)|
-          key = [length, width, thickness]
+        order.map do |(length, width, thickness, color_hex)|
+          key = [length, width, thickness, color_hex]
           {
             count: counts[key],
             length: length,
             width: width,
             thickness: thickness,
-            color: colors[key]
+            color: color_hex
           }
         end
       end
