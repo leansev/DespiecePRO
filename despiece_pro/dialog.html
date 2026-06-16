@@ -216,6 +216,13 @@ body{
     font-weight:600;
 }
 
+.footer-actions{
+    display:flex;
+    flex-direction:column;
+    align-items:flex-end;
+    gap:6px;
+}
+
 .export-btn{
     background:none;
     border:1px solid rgba(255,255,255,.25);
@@ -286,9 +293,14 @@ body{
         <div class="total">
             TOTAL: %TOTAL% piezas
         </div>
-        <button class="export-btn" onclick="exportExcel();">
-            📊 Exportar Excel
-        </button>
+        <div class="footer-actions">
+            <button class="export-btn" onclick="exportExcel();">
+                📊 Exportar Excel
+            </button>
+            <button class="export-btn" onclick="saveState();">
+                💾 Guardar
+            </button>
+        </div>
     </div>
 
 </div>
@@ -471,6 +483,16 @@ body{
             sketchup.export_excel
         ){
             sketchup.export_excel();
+        }
+    };
+
+    window.saveState = function(){
+
+        if(
+            window.sketchup &&
+            sketchup.save_state
+        ){
+            sketchup.save_state();
         }
     };
 

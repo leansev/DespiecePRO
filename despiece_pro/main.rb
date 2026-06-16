@@ -44,6 +44,8 @@ module BiraEstudio
       @scanned_entities = []
       SCAN_MATERIAL_NAME = 'DespiecePRO_escaneado'.freeze
       DEFAULT_BADGE_COLOR = '#ff941f'.freeze
+      ATTRIBUTE_DICT = 'despiece_pro'.freeze
+      ATTRIBUTE_KEY = 'data'.freeze
 
       class << self
         attr_reader :modules, :scanned_entities
@@ -205,12 +207,122 @@ module BiraEstudio
         def clear!
           model = Sketchup.active_model
           cleanup_scan_materials(model) if model
-          @modules.clear
-          @scanned_ids.clear
-          @scanned_entities.clear
+          reset_state!
 
           view = model.active_view if model
           view.invalidate if view
+        end
+
+        def reset_state!
+          @modules.clear
+          @scanned_ids.clear
+          @scanned_entities.clear
+        end
+
+        def save_to_model(model)
+          return false unless model
+
+          model.set_attribute(ATTRIBUTE_DICT, ATTRIBUTE_KEY, serialize_state)
+          Sketchup.status_text = 'Despiece guardado en el modelo'
+          true
+        rescue StandardError => e
+          Sketchup.status_text = "Error al guardar despiece: #{e.message}"
+          false
+        end
+
+        def restore_from_model(model)
+          return unless model
+
+          json = model.get_attribute(ATTRIBUTE_DICT, ATTRIBUTE_KEY)
+          return if json.nil? || json.to_s.strip.empty?
+
+          data = JSON.parse(json)
+          reset_state!
+
+          modules_data = data['modules']
+          return unless modules_data.is_a?(Array)
+
+          modules_data.each do |entry|
+            entity_id = entry['entity_id'].to_i
+            entity = find_entity_by_id(model, entity_id)
+            next unless entity && entity.valid?
+
+            pieces = deserialize_pieces(entry['pieces'])
+            next if pieces.empty?
+
+            @modules << {
+              name: entry['name'].to_s,
+              entity_id: entity_id,
+              pieces: pieces,
+              piece_names: entry['piece_names'] || {},
+              badge_color: entry['badge_color'] || DEFAULT_BADGE_COLOR
+            }
+            @scanned_ids << entity_id
+            @scanned_entities << entity
+          end
+        rescue JSON::ParserError
+          reset_state!
+        end
+
+        def serialize_state
+          modules_data = @modules.map do |entry|
+            {
+              'entity_id' => entry[:entity_id],
+              'name' => entry[:name],
+              'pieces' => entry[:pieces].map do |piece|
+                {
+                  'count' => piece[:count],
+                  'length' => piece[:length],
+                  'width' => piece[:width],
+                  'thickness' => piece[:thickness]
+                }
+              end,
+              'piece_names' => entry[:piece_names] || {},
+              'badge_color' => module_badge_color(entry)
+            }
+          end
+
+          JSON.generate('modules' => modules_data)
+        end
+
+        def deserialize_pieces(pieces_data)
+          return [] unless pieces_data.is_a?(Array)
+
+          pieces_data.map do |piece|
+            {
+              count: piece['count'].to_i,
+              length: piece['length'].to_i,
+              width: piece['width'].to_i,
+              thickness: piece['thickness'].to_i
+            }
+          end
+        end
+
+        def find_entity_by_id(model, entity_id)
+          entity_id = entity_id.to_i
+
+          if model.respond_to?(:find_entity_by_id)
+            entity = model.find_entity_by_id(entity_id)
+            return entity if entity && entity.valid?
+          end
+
+          find_entity_by_id_recursive(model.entities, entity_id)
+        end
+
+        def find_entity_by_id_recursive(entities, entity_id)
+          entities.each do |entity|
+            return entity if entity.valid? && entity.entityID == entity_id
+
+            if entity.is_a?(Sketchup::Group)
+              found = find_entity_by_id_recursive(entity.entities, entity_id)
+              return found if found
+            elsif entity.is_a?(Sketchup::ComponentInstance)
+              found = find_entity_by_id_recursive(entity.definition.entities, entity_id)
+              return found if found
+            end
+          end
+
+          nil
         end
 
         def cleanup_scan_materials(model)
@@ -462,6 +574,7 @@ module BiraEstudio
         end
 
         def show
+          Store.restore_from_model(Sketchup.active_model)
           @dialog ||= build_dialog
           @dialog.set_html(dialog_body_html)
           @dialog.show
@@ -506,6 +619,10 @@ module BiraEstudio
 
           dialog.add_action_callback('export_excel') do |_context|
             ExcelExporter.export
+          end
+
+          dialog.add_action_callback('save_state') do |_context|
+            Store.save_to_model(Sketchup.active_model)
           end
 
           dialog.set_on_closed do
@@ -773,6 +890,7 @@ module BiraEstudio
       menu.add_item(cmd_list)
 
       toolbar.restore
+      Store.restore_from_model(Sketchup.active_model)
       file_loaded(__FILE__)
     end
   end
