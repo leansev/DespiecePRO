@@ -1642,7 +1642,7 @@ module BiraEstudio
 
     unless file_loaded?(__FILE__)
       toolbar = UI::Toolbar.new('Despiece PRO')
-      menu = UI.menu('Extensions')
+      menu = UI.menu('Extensions').add_submenu('Despiece PRO')
 
       cmd_scan = UI::Command.new('Escanear Modulo') do
         Sketchup.active_model.select_tool(BiraEstudio::DespiecePro::ScanModuleTool.new)
