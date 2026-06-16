@@ -299,6 +299,7 @@ module BiraEstudio
 
               rows << {
                 'type' => 'piece',
+                'espesor' => piece[:thickness],
                 'cantidad' => piece[:count],
                 'largo' => piece[:length],
                 'ancho' => piece[:width],
@@ -311,11 +312,6 @@ module BiraEstudio
               }
             end
           end
-
-          rows << {
-            'type' => 'total',
-            'label' => "TOTAL DE PIEZAS: #{total_pieces}"
-          }
 
           {
             'project_title' => project_export_title,

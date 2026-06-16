@@ -34,6 +34,41 @@ def load_payload(json_path):
         return json.load(handle)
 
 
+def group_modules(rows):
+    modules = []
+    current_module = None
+    current_pieces = []
+
+    for item in rows:
+        row_type = item.get('type')
+        if row_type == 'module':
+            if current_module is not None:
+                modules.append((current_module, current_pieces))
+            current_module = item.get('label', '')
+            current_pieces = []
+        elif row_type == 'piece':
+            current_pieces.append(item)
+
+    if current_module is not None:
+        modules.append((current_module, current_pieces))
+
+    return modules
+
+
+def collect_thicknesses(modules):
+    thicknesses = set()
+    for _, pieces in modules:
+        for piece in pieces:
+            thicknesses.add(piece.get('espesor', 0))
+    return sorted(thicknesses, reverse=True)
+
+
+def sheet_title(thickness):
+    if thickness == int(thickness):
+        return f'{int(thickness)}mm'
+    return f'{thickness}mm'
+
+
 def write_header_row(sheet, row_index):
     fill = solid_fill(COLOR_HEADER_BG)
     font = Font(bold=True, color=COLOR_HEADER_FG)
@@ -89,14 +124,18 @@ def write_total_row(sheet, row_index, label):
     cell.font = Font(bold=True)
 
 
-def write_xlsx(output_path, payload):
-    workbook = Workbook()
-    sheet = workbook.active
-    sheet.title = 'Despiece'
+def adjust_column_widths(sheet):
+    for column_index, header in enumerate(HEADERS, start=1):
+        width = max(len(header) + 2, 12)
+        column_letter = sheet.cell(row=2, column=column_index).column_letter
+        sheet.column_dimensions[column_letter].width = width
+
+
+def write_sheet(workbook, sheet_name, project_title, modules, thickness):
+    sheet = workbook.create_sheet(title=sheet_name)
 
     row_index = 1
-    title = payload.get('project_title', 'PROYECTO: Sin nombre')
-    title_cell = sheet.cell(row=row_index, column=1, value=title)
+    title_cell = sheet.cell(row=row_index, column=1, value=project_title)
     title_cell.font = Font(bold=True)
     sheet.merge_cells(
         start_row=row_index,
@@ -109,26 +148,47 @@ def write_xlsx(output_path, payload):
     write_header_row(sheet, row_index)
     row_index += 1
 
-    use_alt_fill = False
-    for item in payload.get('rows', []):
-        row_type = item.get('type')
+    total_count = 0
+    for module_label, pieces in modules:
+        filtered_pieces = [
+            piece for piece in pieces if piece.get('espesor') == thickness
+        ]
+        if not filtered_pieces:
+            continue
 
-        if row_type == 'module':
-            write_module_row(sheet, row_index, item.get('label', ''))
-            row_index += 1
-            use_alt_fill = False
-        elif row_type == 'piece':
-            write_piece_row(sheet, row_index, item, use_alt_fill)
+        write_module_row(sheet, row_index, module_label)
+        row_index += 1
+
+        use_alt_fill = False
+        for piece in filtered_pieces:
+            write_piece_row(sheet, row_index, piece, use_alt_fill)
+            total_count += piece.get('cantidad', 0)
             use_alt_fill = not use_alt_fill
             row_index += 1
-        elif row_type == 'total':
-            write_total_row(sheet, row_index, item.get('label', ''))
-            row_index += 1
 
-    for column_index, header in enumerate(HEADERS, start=1):
-        width = max(len(header) + 2, 12)
-        column_letter = sheet.cell(row=2, column=column_index).column_letter
-        sheet.column_dimensions[column_letter].width = width
+    write_total_row(sheet, row_index, f'TOTAL DE PIEZAS: {total_count}')
+    adjust_column_widths(sheet)
+
+
+def write_xlsx(output_path, payload):
+    project_title = payload.get('project_title', 'PROYECTO: Sin nombre')
+    modules = group_modules(payload.get('rows', []))
+    thicknesses = collect_thicknesses(modules)
+
+    if not thicknesses:
+        thicknesses = [0]
+
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+
+    for thickness in thicknesses:
+        write_sheet(
+            workbook,
+            sheet_title(thickness),
+            project_title,
+            modules,
+            thickness,
+        )
 
     workbook.save(output_path)
 
