@@ -104,6 +104,14 @@ module BiraEstudio
           entry[:piece_cantos][dim_key.to_s] = { 'arr' => arr.to_i, 'aba' => aba.to_i, 'izq' => izq.to_i, 'der' => der.to_i }
         end
 
+        def canto_color(v)
+          v = v.to_i
+          return '#ff1d1d' if v == 1
+          return '#1d35ff' if v == 2
+
+          'rgba(255,255,255,.25)'
+        end
+
         def update_module_badge_color(uid, color)
           entry = find_module_by_uid(uid)
           return unless entry
@@ -167,13 +175,15 @@ module BiraEstudio
 
         def render_piece_row(count, length, width, thickness, acronym, piece_name, dim_key, color, uid)
           dims = length.to_s + ' × ' + width.to_s + ' × ' + thickness.to_s + 'mm'
+          cantos = get_piece_cantos(uid, dim_key)
 
           '<div class="piece-row" data-dim-key="' + escape_html(dim_key) + '">' +
             '<div class="qty">' + count.to_s + 'x</div>' +
             '<div class="dimensions">' + dims + '</div>' +
             '<div><span class="badge" style="color:' + color + ';">' + escape_html(acronym) + '</span></div>' +
             '<div class="piece-name">' + escape_html(piece_name) + '</div>' +
-            '<button class="extra-btn" title="Abrir" data-uid="' + escape_html(uid.to_s) + '" data-dim-key="' + escape_html(dim_key) + '">▤</button>' +
+            '<div class="extra-btn canto-preview" title="Tapacantos" data-uid="' + escape_html(uid.to_s) + '" data-dim-key="' + escape_html(dim_key) + '" ' +
+            'style="border-top-color:' + canto_color(cantos[:arr]) + ';border-bottom-color:' + canto_color(cantos[:aba]) + ';border-left-color:' + canto_color(cantos[:izq]) + ';border-right-color:' + canto_color(cantos[:der]) + ';"></div>' +
             '</div>'
         end
 
@@ -492,6 +502,7 @@ module BiraEstudio
 
             entry[:pieces].each do |piece|
               dim_key = piece_dim_key(piece[:length], piece[:width], piece[:thickness])
+              cantos = get_piece_cantos(entry[:uid], dim_key)
               piece_name = (entry[:piece_names] || {})[dim_key].to_s.strip
               piece_name = export_piece_label(acronym, piece_name)
 
@@ -503,10 +514,10 @@ module BiraEstudio
                 'ancho' => piece[:width],
                 'nombre' => piece_name,
                 'rota' => 1,
-                'canto_arr' => 0,
-                'canto_aba' => 0,
-                'canto_izq' => 0,
-                'canto_der' => 0
+                'canto_arr' => cantos[:arr],
+                'canto_aba' => cantos[:aba],
+                'canto_izq' => cantos[:izq],
+                'canto_der' => cantos[:der]
               }
             end
           end
@@ -674,6 +685,7 @@ module BiraEstudio
           dialog.add_action_callback('save_cantos') do |_context, arr, aba, izq, der|
             Store.update_piece_cantos(@current_uid, @current_dim_key, arr, aba, izq, der)
             Store.save_to_model(Sketchup.active_model)
+            ListDialog.refresh
             dialog.close
           end
 
