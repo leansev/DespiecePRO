@@ -12,7 +12,7 @@ html,body{margin:0;padding:0;width:100%;height:100%;background:#1a2a4a;font-fami
 .icon-btn:hover{color:#ffffff;}
 .content{padding:12px 16px;flex:1;overflow:auto;}
 .placa-row{display:flex;align-items:flex-start;gap:12px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.08);}
-.placa-row:last-child{border-bottom:none;}
+.placa-row.similar { border: 1px solid #ffd54a; border-radius:4px; }
 .placa-main{display:flex;align-items:center;gap:10px;flex:1;min-width:0;}
 .color-box{width:16px;height:16px;border:1px solid rgba(255,255,255,.35);border-radius:3px;flex-shrink:0;box-sizing:border-box;}
 .placa-info{min-width:100px;flex-shrink:0;}
@@ -50,12 +50,16 @@ select.canto-esp:disabled{opacity:.9;cursor:default;}
 <div id="app">
     <div class="header">
         <div class="title">Info de placas</div>
-        <button id="edit-btn" class="icon-btn" title="Editar">&#9998;</button>
+        <div style="display:flex;gap:8px;align-items:center;">
+            <button id="refresh-btn" class="icon-btn" title="Refresh">🔄</button>
+            <button id="edit-btn" class="icon-btn" title="Editar">&#9998;</button>
+        </div>
     </div>
     <div class="content" id="rows">
         %FILAS%
     </div>
     <div class="info-footer" id="info-footer" style="display:none">
+        <button id="merge-btn" class="save-btn" style="margin-right:8px;background:rgba(255,140,0,.24);border-color:rgba(255,140,0,.58);color:#ffd580;">Fusionar seleccionadas</button>
         <button id="save-btn" class="save-btn">Terminar</button>
     </div>
 </div>
@@ -64,6 +68,7 @@ select.canto-esp:disabled{opacity:.9;cursor:default;}
     var app = document.getElementById('app');
     var editBtn = document.getElementById('edit-btn');
     var saveBtn = document.getElementById('save-btn');
+    var mergeBtn = document.getElementById('merge-btn');
     var infoFooter = document.getElementById('info-footer');
 
     function isEditing(){
@@ -103,6 +108,12 @@ select.canto-esp:disabled{opacity:.9;cursor:default;}
         editBtn.style.display = '';
         closeAllCdropLists();
 
+        var checks = document.querySelectorAll('.merge-check');
+        for(i=0;i<checks.length;i++){
+            checks[i].style.display = 'none';
+            checks[i].checked = false;
+        }
+
         for(i=0;i<inputs.length;i++){
             inputs[i].disabled = true;
         }
@@ -119,6 +130,11 @@ select.canto-esp:disabled{opacity:.9;cursor:default;}
         app.classList.add('editing');
         infoFooter.style.display = 'block';
         editBtn.style.display = 'none';
+
+        var checks = document.querySelectorAll('.merge-check');
+        for(i=0;i<checks.length;i++){
+            checks[i].style.display = 'inline-block';
+        }
 
         for(i=0;i<inputs.length;i++){
             if(!isWhiteInput(inputs[i])){
@@ -235,6 +251,27 @@ select.canto-esp:disabled{opacity:.9;cursor:default;}
 
     editBtn.onclick = function(){
         setEditMode();
+    };
+
+    document.getElementById('refresh-btn').onclick = function(){
+        if(window.sketchup && sketchup.refresh_info){ sketchup.refresh_info(); }
+    };
+
+    mergeBtn.onclick = function(){
+        var checked = document.querySelectorAll('.merge-check:checked');
+        if(checked.length < 2){
+            alert('Seleccioná al menos 2 placas para fusionar');
+            return;
+        }
+        var hexes = [];
+        var ths = [];
+        for(var i=0;i<checked.length;i++){
+            hexes.push(checked[i].getAttribute('data-hex'));
+            ths.push(checked[i].getAttribute('data-th'));
+        }
+        if(window.sketchup && sketchup.merge_placas){
+            sketchup.merge_placas(JSON.stringify(hexes), JSON.stringify(ths));
+        }
     };
 
     saveBtn.onclick = function(){

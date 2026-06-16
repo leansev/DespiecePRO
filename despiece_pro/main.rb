@@ -528,6 +528,35 @@ module BiraEstudio
           report
         end
 
+        def merge_placas(hexes, ths)
+          return if hexes.length < 2
+          # Usar el primer hex/th como destino
+          target_hex = hexes[0].to_s.strip.upcase
+          target_th  = ths[0].to_i
+
+          @modules.each do |entry|
+            entry[:pieces].each do |piece|
+              src_hex = piece[:color].to_s.strip.upcase
+              src_th  = piece[:thickness].to_i
+              next unless hexes.map(&:upcase).include?(src_hex)
+              next unless ths.map(&:to_i).include?(src_th)
+              piece[:color]     = target_hex
+              piece[:thickness] = target_th
+            end
+          end
+
+          # Unificar color_names: usar el nombre del primer hex si existe
+          target_name = color_name(target_hex)
+          hexes.each do |h|
+            h = h.to_s.strip.upcase
+            next if h == target_hex
+            existing = color_name(h)
+            target_name = existing unless existing.to_s.strip.empty?
+            @color_names.delete(h)
+          end
+          set_color_name(target_hex, target_name) unless target_name.to_s.strip.empty?
+        end
+
         def restore_from_model(model)
           return 0 unless model
 
@@ -1017,11 +1046,30 @@ module BiraEstudio
             Store.save_to_model(Sketchup.active_model)
           end
 
+          dialog.add_action_callback('refresh_info') do |_context|
+            InfoDialog.refresh
+          end
+
+          dialog.add_action_callback('merge_placas') do |_context, hexes_json, ths_json|
+            hexes = JSON.parse(hexes_json)
+            ths   = JSON.parse(ths_json)
+            Store.merge_placas(hexes, ths)
+            Store.save_to_model(Sketchup.active_model)
+            InfoDialog.refresh
+            ListDialog.refresh
+          end
+
           dialog.set_on_closed do
             @dialog = nil
           end
 
           dialog
+        end
+
+        def refresh
+          return unless @dialog && @dialog.visible?
+
+          @dialog.set_html(dialog_body_html)
         end
 
         def dialog_body_html
@@ -1034,13 +1082,18 @@ module BiraEstudio
           return '<div class="empty-placas">Sin placas detectadas.</div>' if placas.empty?
 
           distinct_colors = Store.distinct_colors
+          similar_keys = similar_placa_keys(placas)
 
           placas.map do |placa|
             hex = Store.escape_html(placa[:color])
+            hex_raw = placa[:color].to_s.strip.upcase
+            th = placa[:thickness].to_i
+            th_esc = Store.escape_html(th.to_s)
             is_white = placa[:color].to_s.upcase == '#FFFFFF'
             label = 'Placa ' + placa[:thickness].to_s + 'mm'
             count_text = placa[:piece_count].to_s + ' piezas'
             canto_config = Store.get_canto_config(placa[:thickness], placa[:color])
+            row_class = similar_keys.include?([th, hex_raw]) ? 'placa-row similar' : 'placa-row'
 
             if is_white
               name_input = '<input type="text" class="name-input" value="Blanco" disabled data-hex="' + hex + '">'
@@ -1049,7 +1102,10 @@ module BiraEstudio
               name_input = '<input type="text" class="name-input" value="' + name_value + '" data-hex="' + hex + '" placeholder="Nombre de color">'
             end
 
-            '<div class="placa-row">' +
+            merge_check = '<input type="checkbox" class="merge-check" data-hex="' + hex + '" data-th="' + th_esc + '" style="display:none">'
+
+            '<div class="' + row_class + '" data-hex="' + hex + '" data-th="' + th_esc + '">' +
+              merge_check +
               '<div class="placa-main">' +
               '<div class="color-box" style="background:' + hex + ';"></div>' +
               '<div class="placa-info">' +
@@ -1061,6 +1117,39 @@ module BiraEstudio
               render_canto_block(placa[:thickness], placa[:color], canto_config, distinct_colors) +
               '</div>'
           end.join('')
+        end
+
+        def similar_placa_keys(placas)
+          keys = []
+          placas.each_with_index do |p1, i|
+            placas.each_with_index do |p2, j|
+              next if i >= j
+              next unless p1[:thickness] == p2[:thickness]
+              next if p1[:color].to_s.strip.upcase == p2[:color].to_s.strip.upcase
+              next unless colors_similar?(p1[:color], p2[:color])
+
+              keys << [p1[:thickness].to_i, p1[:color].to_s.strip.upcase]
+              keys << [p2[:thickness].to_i, p2[:color].to_s.strip.upcase]
+            end
+          end
+          keys.uniq
+        end
+
+        def colors_similar?(hex1, hex2)
+          r1, g1, b1 = hex_to_rgb(hex1)
+          r2, g2, b2 = hex_to_rgb(hex2)
+          (r1 - r2).abs < 30 && (g1 - g2).abs < 30 && (b1 - b2).abs < 30
+        end
+
+        def hex_to_rgb(hex)
+          hex = hex.to_s.strip.upcase.delete('#')
+          return [255, 255, 255] if hex.empty?
+
+          if hex.length == 6
+            [hex[0..1].to_i(16), hex[2..3].to_i(16), hex[4..5].to_i(16)]
+          else
+            [255, 255, 255]
+          end
         end
 
         def render_canto_block(thickness, color_hex, config, distinct_colors)
