@@ -231,37 +231,77 @@ module BiraEstudio
         end
 
         def restore_from_model(model)
-          return unless model
+          return 0 unless model
 
-          json = model.get_attribute(ATTRIBUTE_DICT, ATTRIBUTE_KEY)
-          return if json.nil? || json.to_s.strip.empty?
+          raw = model.get_attribute(ATTRIBUTE_DICT, ATTRIBUTE_KEY)
+          if raw.nil? || raw.to_s.strip.empty?
+            puts 'Despiece PRO: sin datos guardados en despiece_pro/data'
+            return 0
+          end
 
-          data = JSON.parse(json)
+          data = parse_saved_state(raw)
           reset_state!
 
           modules_data = data['modules']
-          return unless modules_data.is_a?(Array)
+          unless modules_data.is_a?(Array)
+            puts 'Despiece PRO: JSON guardado sin lista de modulos valida'
+            return 0
+          end
 
+          restored_count = 0
           modules_data.each do |entry|
+            entry = normalize_hash(entry)
             entity_id = entry['entity_id'].to_i
-            entity = find_entity_by_id(model, entity_id)
-            next unless entity && entity.valid?
-
             pieces = deserialize_pieces(entry['pieces'])
-            next if pieces.empty?
+            if pieces.empty?
+              puts "Despiece PRO: modulo #{entity_id} descartado (sin piezas validas)"
+              next
+            end
+
+            entity = find_entity_by_id(model, entity_id)
+            if entity && entity.valid?
+              @scanned_ids << entity_id unless @scanned_ids.include?(entity_id)
+              @scanned_entities << entity unless @scanned_entities.include?(entity)
+            else
+              puts "Despiece PRO: entityID #{entity_id} no encontrado, restaurando modulo igual"
+            end
 
             @modules << {
               name: entry['name'].to_s,
               entity_id: entity_id,
               pieces: pieces,
-              piece_names: entry['piece_names'] || {},
+              piece_names: normalize_hash(entry['piece_names'] || {}),
               badge_color: entry['badge_color'] || DEFAULT_BADGE_COLOR
             }
-            @scanned_ids << entity_id
-            @scanned_entities << entity
+            restored_count += 1
           end
-        rescue JSON::ParserError
+
+          puts "Despiece PRO: #{restored_count} modulos restaurados de #{modules_data.length}"
+          restored_count
+        rescue JSON::ParserError => e
+          puts "Despiece PRO: error al parsear JSON guardado - #{e.message}"
           reset_state!
+          0
+        rescue StandardError => e
+          puts "Despiece PRO: error al restaurar - #{e.class}: #{e.message}"
+          reset_state!
+          0
+        end
+
+        def parse_saved_state(raw)
+          return raw if raw.is_a?(Hash)
+
+          JSON.parse(raw.to_s)
+        end
+
+        def normalize_hash(value)
+          return {} unless value.is_a?(Hash)
+
+          normalized = {}
+          value.each do |key, item|
+            normalized[key.to_s] = item
+          end
+          normalized
         end
 
         def serialize_state
@@ -289,6 +329,7 @@ module BiraEstudio
           return [] unless pieces_data.is_a?(Array)
 
           pieces_data.map do |piece|
+            piece = normalize_hash(piece)
             {
               count: piece['count'].to_i,
               length: piece['length'].to_i,
@@ -302,8 +343,12 @@ module BiraEstudio
           entity_id = entity_id.to_i
 
           if model.respond_to?(:find_entity_by_id)
-            entity = model.find_entity_by_id(entity_id)
-            return entity if entity && entity.valid?
+            begin
+              entity = model.find_entity_by_id(entity_id)
+              return entity if entity && entity.valid?
+            rescue StandardError
+              # SketchUp 2017 puede no soportar find_entity_by_id de forma fiable
+            end
           end
 
           find_entity_by_id_recursive(model.entities, entity_id)
@@ -311,13 +356,11 @@ module BiraEstudio
 
         def find_entity_by_id_recursive(entities, entity_id)
           entities.each do |entity|
-            return entity if entity.valid? && entity.entityID == entity_id
+            next unless entity.valid?
+            return entity if entity.entityID == entity_id
 
             if entity.is_a?(Sketchup::Group)
               found = find_entity_by_id_recursive(entity.entities, entity_id)
-              return found if found
-            elsif entity.is_a?(Sketchup::ComponentInstance)
-              found = find_entity_by_id_recursive(entity.definition.entities, entity_id)
               return found if found
             end
           end
@@ -574,10 +617,11 @@ module BiraEstudio
         end
 
         def show
-          Store.restore_from_model(Sketchup.active_model)
+          restored = Store.restore_from_model(Sketchup.active_model)
           @dialog ||= build_dialog
           @dialog.set_html(dialog_body_html)
           @dialog.show
+          Sketchup.status_text = "Despiece PRO: #{restored} modulos restaurados" if restored > 0
         end
 
         def build_dialog
