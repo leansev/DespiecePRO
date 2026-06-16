@@ -467,6 +467,10 @@ module BiraEstudio
           scanner = BiraEstudio::DespiecePro::ScanModuleTool.new
           report = { added: [], removed: [], changed: [] }
 
+          dim_key_no_color = lambda do |length, width, thickness|
+            "#{length.to_i},#{width.to_i},#{thickness.to_i}"
+          end
+
           @modules.each do |entry|
             uid = entry[:uid]
             entity = uid_map[uid]
@@ -484,33 +488,36 @@ module BiraEstudio
               next
             end
 
-            old_keys = entry[:pieces].map { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') }
-            new_keys = new_grouped.map { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') }
+            old_keys = entry[:pieces].map { |p| dim_key_no_color.call(p[:length], p[:width], p[:thickness]) }
+            new_keys = new_grouped.map { |p| dim_key_no_color.call(p[:length], p[:width], p[:thickness]) }
 
             added_keys = new_keys - old_keys
             removed_keys = old_keys - new_keys
             changed_keys = (old_keys & new_keys).select do |k|
-              old_p = entry[:pieces].find { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') == k }
-              new_p = new_grouped.find { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') == k }
+              old_p = entry[:pieces].find { |p| dim_key_no_color.call(p[:length], p[:width], p[:thickness]) == k }
+              new_p = new_grouped.find { |p| dim_key_no_color.call(p[:length], p[:width], p[:thickness]) == k }
               old_p && new_p && old_p[:count] != new_p[:count]
             end
 
             added_keys.each do |k|
-              p = new_grouped.find { |np| piece_dim_key(np[:length], np[:width], np[:thickness], np[:color] || '#FFFFFF') == k }
-              name = (entry[:piece_names] || {})[k].to_s
+              p = new_grouped.find { |np| dim_key_no_color.call(np[:length], np[:width], np[:thickness]) == k }
+              pk = piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF')
+              name = (entry[:piece_names] || {})[pk].to_s
               report[:added] << { module_name: entry[:name], piece: p, name: name }
             end
 
             removed_keys.each do |k|
-              p = entry[:pieces].find { |op| piece_dim_key(op[:length], op[:width], op[:thickness], op[:color] || '#FFFFFF') == k }
-              name = (entry[:piece_names] || {})[k].to_s
+              p = entry[:pieces].find { |op| dim_key_no_color.call(op[:length], op[:width], op[:thickness]) == k }
+              pk = piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF')
+              name = (entry[:piece_names] || {})[pk].to_s
               report[:removed] << { module_name: entry[:name], piece: p, name: name }
             end
 
             changed_keys.each do |k|
-              old_p = entry[:pieces].find { |op| piece_dim_key(op[:length], op[:width], op[:thickness], op[:color] || '#FFFFFF') == k }
-              new_p = new_grouped.find { |np| piece_dim_key(np[:length], np[:width], np[:thickness], np[:color] || '#FFFFFF') == k }
-              name = (entry[:piece_names] || {})[k].to_s
+              old_p = entry[:pieces].find { |op| dim_key_no_color.call(op[:length], op[:width], op[:thickness]) == k }
+              new_p = new_grouped.find { |np| dim_key_no_color.call(np[:length], np[:width], np[:thickness]) == k }
+              pk = piece_dim_key(old_p[:length], old_p[:width], old_p[:thickness], old_p[:color] || '#FFFFFF')
+              name = (entry[:piece_names] || {})[pk].to_s
               report[:changed] << { module_name: entry[:name], old: old_p, new: new_p, name: name }
             end
 
