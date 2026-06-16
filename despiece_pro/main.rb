@@ -1353,6 +1353,23 @@ module BiraEstudio
 
           dialog.add_action_callback('update_module_name') do |_context, entity_id, name|
             Store.update_module_name(entity_id, name)
+            entry = Store.find_module_by_uid(entity_id)
+            next unless entry
+
+            acronym = Store.module_acronym(entry[:name])
+            begin
+              @dialog.execute_script(
+                "var mEl = document.querySelector('.module[data-entity-id=\"' + #{entity_id.to_s.inspect} + '\"]');" \
+                "if(mEl){" \
+                "  var codeEl = mEl.querySelector('.module-code');" \
+                "  if(codeEl){ codeEl.textContent = #{acronym.inspect}; }" \
+                "  var badges = mEl.querySelectorAll('.badge');" \
+                "  for(var i=0;i<badges.length;i++){ badges[i].textContent = #{acronym.inspect}; }" \
+                "}"
+              )
+            rescue StandardError
+              nil
+            end
           end
 
           dialog.add_action_callback('update_piece_name') do |_context, entity_id, dim_key, name|
