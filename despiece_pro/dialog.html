@@ -735,6 +735,10 @@ body{
                 var module = findParentByClass(header, 'module');
                 if(module){
                     module.classList.toggle('open');
+                    var isOpen = module.classList.contains('open');
+                    if(window.sketchup && sketchup.set_module_open){
+                        sketchup.set_module_open(module.getAttribute('data-entity-id'), isOpen ? '1' : '0');
+                    }
                 }
             });
         })(moduleHeaders[h]);

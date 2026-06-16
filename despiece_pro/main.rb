@@ -59,6 +59,7 @@ module BiraEstudio
       @scanned_entities = []
       @color_names = {}
       @canto_config = {}
+      @open_module_uids = []
       SCAN_MATERIAL_NAME = 'DespiecePRO_escaneado'.freeze
       DEFAULT_BADGE_COLOR = '#ff941f'.freeze
       ATTRIBUTE_DICT = 'despiece_pro'.freeze
@@ -82,6 +83,19 @@ module BiraEstudio
         def find_module_by_uid(uid)
           uid = uid.to_s
           @modules.find { |entry| entry[:uid].to_s == uid }
+        end
+
+        def set_module_open(uid, open)
+          @open_module_uids ||= []
+          if open
+            @open_module_uids << uid.to_s unless @open_module_uids.include?(uid.to_s)
+          else
+            @open_module_uids.delete(uid.to_s)
+          end
+        end
+
+        def module_open?(uid)
+          (@open_module_uids || []).include?(uid.to_s)
         end
 
         def update_module_name(uid, name)
@@ -288,7 +302,9 @@ module BiraEstudio
             )
           end.join('')
 
-          '<div class="module" data-entity-id="' + escape_html(uid.to_s) + '">' +
+          open_class = module_open?(entry[:uid]) ? ' open' : ''
+
+          '<div class="module' + open_class + '" data-entity-id="' + escape_html(uid.to_s) + '">' +
             '<div class="module-header">' +
             '<div class="module-header-left">' +
             '<div class="module-code" style="color:' + color + ';">' + escape_html(acronym) + '</div>' +
@@ -387,6 +403,7 @@ module BiraEstudio
           @scanned_entities.clear
           @color_names = {}
           @canto_config = {}
+          @open_module_uids = []
         end
 
         def entity_uid(entity)
@@ -1083,9 +1100,7 @@ module BiraEstudio
           if @dialog && @dialog.visible?
             begin
               @dialog.execute_script(
-                "window.__scrollTop = document.getElementById('app') ? document.getElementById('app').scrollTop : 0;" \
-                "window.__openModules = [];" \
-                "document.querySelectorAll('.module.open').forEach(function(m){ window.__openModules.push(m.getAttribute('data-entity-id')); });"
+                "window.__scrollTop = document.getElementById('app') ? document.getElementById('app').scrollTop : 0;"
               )
             rescue StandardError
               nil
@@ -1095,11 +1110,6 @@ module BiraEstudio
           if @dialog && @dialog.visible?
             begin
               @dialog.execute_script(
-                "var ids = window.__openModules || [];" \
-                "ids.forEach(function(id){" \
-                "  var m = document.querySelector('.module[data-entity-id=\"' + id + '\"]');" \
-                "  if(m){ m.classList.add('open'); }" \
-                "});" \
                 "var app = document.getElementById('app');" \
                 "if(app && window.__scrollTop){ app.scrollTop = window.__scrollTop; }"
               )
@@ -1135,6 +1145,10 @@ module BiraEstudio
 
           dialog.add_action_callback('update_module_badge_color') do |_context, entity_id, color|
             Store.update_module_badge_color(entity_id, color)
+          end
+
+          dialog.add_action_callback('set_module_open') do |_context, entity_id, open|
+            Store.set_module_open(entity_id, open == '1')
           end
 
           dialog.add_action_callback('refresh_list') do |_context|
