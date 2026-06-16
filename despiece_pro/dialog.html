@@ -181,6 +181,25 @@ body{
     text-overflow:ellipsis;
 }
 
+.extra-btn{
+    border:none;
+    background:none;
+    color:#9fb4ce;
+    cursor:pointer;
+    font-size:16px;
+    padding:0;
+    width:20px;
+    height:20px;
+    line-height:20px;
+    text-align:center;
+    flex-shrink:0;
+    margin-left:auto;
+}
+
+.extra-btn:hover{
+    color:#ffffff;
+}
+
 /* ==========================================
    EDICIÓN
 ========================================== */
@@ -584,6 +603,26 @@ body{
     };
 
     document.addEventListener('click', function(e){
+
+        var extraBtn = findParentByClass(e.target, 'extra-btn');
+
+        if(extraBtn){
+
+            var uid =
+                extraBtn.getAttribute('data-uid');
+
+            var dimKey =
+                extraBtn.getAttribute('data-dim-key');
+
+            if(
+                window.sketchup &&
+                sketchup.open_extra
+            ){
+                sketchup.open_extra(uid, dimKey);
+            }
+
+            return;
+        }
 
         var deleteBtn = findParentByClass(e.target, 'delete-btn');
 

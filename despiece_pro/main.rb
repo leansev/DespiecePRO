@@ -57,6 +57,7 @@ module BiraEstudio
             uid: uid.to_s,
             pieces: pieces,
             piece_names: {},
+            piece_cantos: {},
             badge_color: DEFAULT_BADGE_COLOR
           }
         end
@@ -86,6 +87,21 @@ module BiraEstudio
           else
             entry[:piece_names][dim_key.to_s] = name
           end
+        end
+
+        def get_piece_cantos(uid, dim_key)
+          entry = find_module_by_uid(uid)
+          return { arr: 0, aba: 0, izq: 0, der: 0 } unless entry
+          stored = (entry[:piece_cantos] || {})[dim_key.to_s]
+          return { arr: 0, aba: 0, izq: 0, der: 0 } unless stored
+          { arr: stored['arr'].to_i, aba: stored['aba'].to_i, izq: stored['izq'].to_i, der: stored['der'].to_i }
+        end
+
+        def update_piece_cantos(uid, dim_key, arr, aba, izq, der)
+          entry = find_module_by_uid(uid)
+          return unless entry
+          entry[:piece_cantos] ||= {}
+          entry[:piece_cantos][dim_key.to_s] = { 'arr' => arr.to_i, 'aba' => aba.to_i, 'izq' => izq.to_i, 'der' => der.to_i }
         end
 
         def update_module_badge_color(uid, color)
@@ -127,7 +143,8 @@ module BiraEstudio
               acronym,
               piece_name,
               dim_key,
-              color
+              color,
+              uid
             )
           end.join('')
 
@@ -148,7 +165,7 @@ module BiraEstudio
             '</div>'
         end
 
-        def render_piece_row(count, length, width, thickness, acronym, piece_name, dim_key, color)
+        def render_piece_row(count, length, width, thickness, acronym, piece_name, dim_key, color, uid)
           dims = length.to_s + ' × ' + width.to_s + ' × ' + thickness.to_s + 'mm'
 
           '<div class="piece-row" data-dim-key="' + escape_html(dim_key) + '">' +
@@ -156,6 +173,7 @@ module BiraEstudio
             '<div class="dimensions">' + dims + '</div>' +
             '<div><span class="badge" style="color:' + color + ';">' + escape_html(acronym) + '</span></div>' +
             '<div class="piece-name">' + escape_html(piece_name) + '</div>' +
+            '<button class="extra-btn" title="Abrir" data-uid="' + escape_html(uid.to_s) + '" data-dim-key="' + escape_html(dim_key) + '">▤</button>' +
             '</div>'
         end
 
@@ -323,6 +341,7 @@ module BiraEstudio
               uid: uid,
               pieces: pieces,
               piece_names: normalize_hash(entry['piece_names'] || {}),
+              piece_cantos: normalize_hash(entry['piece_cantos'] || {}),
               badge_color: entry['badge_color'] || DEFAULT_BADGE_COLOR
             }
             restored_count += 1
@@ -370,6 +389,7 @@ module BiraEstudio
                 }
               end,
               'piece_names' => entry[:piece_names] || {},
+              'piece_cantos' => entry[:piece_cantos] || {},
               'badge_color' => module_badge_color(entry)
             }
           end
@@ -621,6 +641,65 @@ module BiraEstudio
       end
     end
 
+    class ExtraDialog
+      DIALOG_KEY = 'despiece_pro_extra'.freeze
+
+      class << self
+        def show(uid, dim_key)
+          entry = Store.find_module_by_uid(uid)
+          return unless entry
+          piece = entry[:pieces].find { |p| Store.piece_dim_key(p[:length], p[:width], p[:thickness]) == dim_key.to_s }
+          return unless piece
+          piece_name = (entry[:piece_names] || {})[dim_key.to_s].to_s.strip
+          piece_name = 'Pieza' if piece_name.empty?
+          @current_uid = uid
+          @current_dim_key = dim_key
+          cantos = Store.get_piece_cantos(uid, dim_key)
+          @dialog ||= build_dialog
+          @dialog.set_html(dialog_body_html(piece, piece_name, cantos))
+          @dialog.show
+        end
+
+        def build_dialog
+          dialog = UI::HtmlDialog.new(
+            dialog_title: 'Tapacantos',
+            preferences_key: DIALOG_KEY,
+            scrollable: false,
+            resizable: true,
+            width: 560,
+            height: 480,
+            style: UI::HtmlDialog::STYLE_DIALOG
+          )
+
+          dialog.add_action_callback('save_cantos') do |_context, arr, aba, izq, der|
+            Store.update_piece_cantos(@current_uid, @current_dim_key, arr, aba, izq, der)
+            Store.save_to_model(Sketchup.active_model)
+            dialog.close
+          end
+
+          dialog.set_on_closed do
+            @dialog = nil
+            @current_uid = nil
+            @current_dim_key = nil
+          end
+
+          dialog
+        end
+
+        def dialog_body_html(piece, piece_name, cantos)
+          html = File.read(File.join(PLUGIN_DIR, 'extra_dialog.html'))
+          html.gsub('%LARGO%', piece[:length].to_s)
+              .gsub('%ANCHO%', piece[:width].to_s)
+              .gsub('%ESPESOR%', piece[:thickness].to_s)
+              .gsub('%NOMBRE_PIEZA%', Store.escape_html(piece_name))
+              .gsub('%CANTO_ARR%', cantos[:arr].to_s)
+              .gsub('%CANTO_ABA%', cantos[:aba].to_s)
+              .gsub('%CANTO_IZQ%', cantos[:izq].to_s)
+              .gsub('%CANTO_DER%', cantos[:der].to_s)
+        end
+      end
+    end
+
     class ListDialog
       DIALOG_KEY = 'despiece_pro_list'.freeze
 
@@ -690,6 +769,10 @@ module BiraEstudio
 
           dialog.add_action_callback('save_state') do |_context|
             Store.save_to_model(Sketchup.active_model)
+          end
+
+          dialog.add_action_callback('open_extra') do |_context, uid, dim_key|
+            ExtraDialog.show(uid, dim_key)
           end
 
           dialog.set_on_closed do
