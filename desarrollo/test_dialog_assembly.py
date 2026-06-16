@@ -1,9 +1,9 @@
 # -*- coding: utf-8 -*-
-import re
 import os
+import re
 
-ROOT = os.path.dirname(os.path.abspath(__file__))
-DIALOG = os.path.join(ROOT, 'despiece_pro', 'dialog.html')
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DIALOG = os.path.join(REPO_ROOT, 'despiece_pro', 'dialog.html')
 
 SAMPLE_CONTENT = (
     '<div class="module" data-entity-id="12345">'

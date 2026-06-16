@@ -5,6 +5,8 @@ import os
 
 from PIL import Image, ImageDraw
 
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
 BG = (0x1A, 0x2A, 0x4A)
 WHITE = (0xFF, 0xFF, 0xFF)
 CYAN = (0x66, 0xCC, 0xFF)
@@ -74,7 +76,7 @@ def draw_list(size):
 
 
 def main():
-    base = os.path.join("despiece_pro", "icons")
+    base = os.path.join(REPO_ROOT, 'despiece_pro', 'icons')
     os.makedirs(base, exist_ok=True)
 
     specs = [
@@ -91,5 +93,5 @@ def main():
         print(f"Generado: {path} ({size}x{size}, RGB)")
 
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
