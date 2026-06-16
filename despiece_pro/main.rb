@@ -36,6 +36,14 @@ module BiraEstudio
 
         ordered_lwt_mm([vx.length, vy.length, vz.length])
       end
+
+      def piece_color_hex(entity)
+        mat = entity.material rescue nil
+        return '#FFFFFF' unless mat
+
+        c = mat.color
+        '#%02X%02X%02X' % [c.red, c.green, c.blue]
+      end
     end
 
     class Store
@@ -152,7 +160,8 @@ module BiraEstudio
               piece_name,
               dim_key,
               color,
-              uid
+              uid,
+              piece[:color] || '#FFFFFF'
             )
           end.join('')
 
@@ -173,11 +182,12 @@ module BiraEstudio
             '</div>'
         end
 
-        def render_piece_row(count, length, width, thickness, acronym, piece_name, dim_key, color, uid)
+        def render_piece_row(count, length, width, thickness, acronym, piece_name, dim_key, color, uid, color_pieza)
           dims = length.to_s + ' × ' + width.to_s + ' × ' + thickness.to_s + 'mm'
           cantos = get_piece_cantos(uid, dim_key)
 
           '<div class="piece-row" data-dim-key="' + escape_html(dim_key) + '">' +
+            '<div class="color-chip" style="background:' + escape_html(color_pieza) + ';"></div>' +
             '<div class="qty">' + count.to_s + 'x</div>' +
             '<div class="dimensions">' + dims + '</div>' +
             '<div><span class="badge" style="color:' + color + ';">' + escape_html(acronym) + '</span></div>' +
@@ -395,7 +405,8 @@ module BiraEstudio
                   'count' => piece[:count],
                   'length' => piece[:length],
                   'width' => piece[:width],
-                  'thickness' => piece[:thickness]
+                  'thickness' => piece[:thickness],
+                  'color' => piece[:color] || '#FFFFFF'
                 }
               end,
               'piece_names' => entry[:piece_names] || {},
@@ -412,11 +423,14 @@ module BiraEstudio
 
           pieces_data.map do |piece|
             piece = normalize_hash(piece)
+            piece_color = piece['color'].to_s.strip
+            piece_color = '#FFFFFF' if piece_color.empty?
             {
               count: piece['count'].to_i,
               length: piece['length'].to_i,
               width: piece['width'].to_i,
-              thickness: piece['thickness'].to_i
+              thickness: piece['thickness'].to_i,
+              color: piece_color
             }
           end
         end
@@ -1000,6 +1014,7 @@ module BiraEstudio
 
       def group_pieces_by_dimensions(pieces)
         counts = {}
+        colors = {}
         order = []
 
         pieces.each do |piece|
@@ -1008,6 +1023,7 @@ module BiraEstudio
             key = [dims[:length], dims[:width], dims[:thickness]].sort { |a, b| b <=> a }
             unless counts.key?(key)
               counts[key] = 0
+              colors[key] = DimHelpers.piece_color_hex(piece)
               order << key
             end
             counts[key] += 1
@@ -1017,11 +1033,13 @@ module BiraEstudio
         end
 
         order.map do |(length, width, thickness)|
+          key = [length, width, thickness]
           {
-            count: counts[[length, width, thickness]],
+            count: counts[key],
             length: length,
             width: width,
-            thickness: thickness
+            thickness: thickness,
+            color: colors[key]
           }
         end
       end
