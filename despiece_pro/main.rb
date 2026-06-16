@@ -51,6 +51,7 @@ module BiraEstudio
       @scanned_uids = []
       @scanned_entities = []
       @color_names = {}
+      @canto_config = {}
       SCAN_MATERIAL_NAME = 'DespiecePRO_escaneado'.freeze
       DEFAULT_BADGE_COLOR = '#ff941f'.freeze
       ATTRIBUTE_DICT = 'despiece_pro'.freeze
@@ -129,6 +130,14 @@ module BiraEstudio
           (@color_names || {})[hex].to_s
         end
 
+        def placa_label(thickness, color)
+          th = thickness.to_i.to_s + 'mm'
+          name = color_name(color)
+          name = 'Blanco' if name.to_s.strip.empty?
+
+          th + ' ' + name
+        end
+
         def set_color_name(hex, name)
           hex = hex.to_s.strip.upcase
           hex = '#FFFFFF' if hex.empty?
@@ -177,6 +186,54 @@ module BiraEstudio
               piece_count: totals[[thickness, color]]
             }
           end
+        end
+
+        def placa_config_key(thickness, color)
+          color = color.to_s.strip.upcase
+          color = '#FFFFFF' if color.empty?
+
+          "#{thickness.to_i},#{color}"
+        end
+
+        def get_canto_config(thickness, color)
+          key = placa_config_key(thickness, color)
+          stored = (@canto_config || {})[key]
+          return {} unless stored.is_a?(Hash)
+
+          stored
+        end
+
+        def set_canto_config(thickness, color, slot, field, value)
+          key = placa_config_key(thickness, color)
+          slot = slot.to_s.strip.downcase
+          field = field.to_s.strip.downcase
+          return unless %w[rojo azul].include?(slot)
+          return unless %w[color espesor].include?(field)
+
+          @canto_config ||= {}
+          @canto_config[key] ||= {}
+          @canto_config[key][slot] ||= {}
+          value = value.to_s.strip
+          if value.empty?
+            @canto_config[key][slot].delete(field)
+          else
+            value = value.upcase if field == 'color'
+            @canto_config[key][slot][field] = value
+          end
+        end
+
+        def distinct_colors
+          colors = {}
+
+          @modules.each do |entry|
+            entry[:pieces].each do |piece|
+              color = piece[:color].to_s.strip.upcase
+              color = '#FFFFFF' if color.empty?
+              colors[color] = true
+            end
+          end
+
+          colors.keys.sort
         end
 
         def update_module_badge_color(uid, color)
@@ -320,6 +377,7 @@ module BiraEstudio
           @scanned_uids.clear
           @scanned_entities.clear
           @color_names = {}
+          @canto_config = {}
         end
 
         def entity_uid(entity)
@@ -389,6 +447,7 @@ module BiraEstudio
           data = parse_saved_state(raw)
           reset_state!
           @color_names = normalize_hash(data['color_names'] || {})
+          @canto_config = normalize_canto_config(data['canto_config'] || {})
 
           modules_data = data['modules']
           unless modules_data.is_a?(Array)
@@ -459,6 +518,25 @@ module BiraEstudio
           normalized
         end
 
+        def normalize_canto_config(value)
+          return {} unless value.is_a?(Hash)
+
+          normalized = {}
+          value.each do |placa_key, slots|
+            next unless slots.is_a?(Hash)
+
+            slot_data = {}
+            slots.each do |slot, fields|
+              next unless fields.is_a?(Hash)
+
+              fields = normalize_hash(fields)
+              slot_data[slot.to_s] = fields
+            end
+            normalized[placa_key.to_s] = slot_data
+          end
+          normalized
+        end
+
         def serialize_state
           modules_data = @modules.map do |entry|
             {
@@ -481,7 +559,8 @@ module BiraEstudio
 
           JSON.generate(
             'modules' => modules_data,
-            'color_names' => @color_names || {}
+            'color_names' => @color_names || {},
+            'canto_config' => @canto_config || {}
           )
         end
 
@@ -596,6 +675,7 @@ module BiraEstudio
                 'nombre' => piece_name,
                 'rota' => 1,
                 'color' => piece[:color] || '#FFFFFF',
+                'placa_nombre' => placa_label(piece[:thickness], piece[:color] || '#FFFFFF'),
                 'canto_arr' => cantos[:arr],
                 'canto_aba' => cantos[:aba],
                 'canto_izq' => cantos[:izq],
@@ -822,6 +902,11 @@ module BiraEstudio
             Store.save_to_model(Sketchup.active_model)
           end
 
+          dialog.add_action_callback('update_canto_config') do |_context, th, color, slot, field, value|
+            Store.set_canto_config(th, color, slot, field, value)
+            Store.save_to_model(Sketchup.active_model)
+          end
+
           dialog.set_on_closed do
             @dialog = nil
           end
@@ -838,11 +923,14 @@ module BiraEstudio
           placas = Store.placas_list
           return '<div class="empty-placas">Sin placas detectadas.</div>' if placas.empty?
 
+          distinct_colors = Store.distinct_colors
+
           placas.map do |placa|
             hex = Store.escape_html(placa[:color])
             is_white = placa[:color].to_s.upcase == '#FFFFFF'
             label = 'Placa ' + placa[:thickness].to_s + 'mm'
             count_text = placa[:piece_count].to_s + ' piezas'
+            canto_config = Store.get_canto_config(placa[:thickness], placa[:color])
 
             if is_white
               name_input = '<input type="text" class="name-input" value="Blanco" disabled data-hex="' + hex + '">'
@@ -852,13 +940,88 @@ module BiraEstudio
             end
 
             '<div class="placa-row">' +
+              '<div class="placa-main">' +
               '<div class="color-box" style="background:' + hex + ';"></div>' +
               '<div class="placa-info">' +
               '<div class="placa-label">' + Store.escape_html(label) + '</div>' +
               '<div class="placa-count">' + Store.escape_html(count_text) + '</div>' +
               '</div>' +
               '<div class="placa-name">' + name_input + '</div>' +
+              '</div>' +
+              render_canto_block(placa[:thickness], placa[:color], canto_config, distinct_colors) +
               '</div>'
+          end.join('')
+        end
+
+        def render_canto_block(thickness, color_hex, config, distinct_colors)
+          '<div class="canto-block">' +
+            render_canto_line(thickness, color_hex, 'rojo', 'chip-rojo', '#ff1d1d', config, distinct_colors) +
+            render_canto_line(thickness, color_hex, 'azul', 'chip-azul', '#1d35ff', config, distinct_colors) +
+            '</div>'
+        end
+
+        def render_canto_line(thickness, color_hex, slot, chip_class, chip_color, config, distinct_colors)
+          th_attr = Store.escape_html(thickness.to_s)
+          color_attr = Store.escape_html(color_hex.to_s.upcase)
+          slot_attr = Store.escape_html(slot)
+          slot_cfg = config[slot] || config[slot.to_sym] || {}
+          slot_cfg = Store.normalize_hash(slot_cfg) if slot_cfg.is_a?(Hash)
+          color_val = slot_cfg['color'].to_s
+          esp_val = slot_cfg['espesor'].to_s
+
+          '<div class="canto-line">' +
+            '<div class="canto-chip ' + chip_class + '" style="background:' + chip_color + ';"></div>' +
+            render_color_dropdown(thickness, color_hex, slot, distinct_colors, color_val) +
+            '<select class="canto-esp canto-select" data-th="' + th_attr + '" data-color="' + color_attr + '" data-slot="' + slot_attr + '">' +
+            render_canto_espesor_options(esp_val) +
+            '</select>' +
+            '</div>'
+        end
+
+        def render_color_dropdown(thickness, color_hex, slot, distinct_colors, selected_hex)
+          th_attr = Store.escape_html(thickness.to_s)
+          color_attr = Store.escape_html(color_hex.to_s.upcase)
+          slot_attr = Store.escape_html(slot)
+
+          '<div class="cdrop" data-th="' + th_attr + '" data-color="' + color_attr + '" data-slot="' + slot_attr + '">' +
+            '<div class="cdrop-selected">' + render_cdrop_selected_content(distinct_colors, selected_hex) + '</div>' +
+            '<div class="cdrop-list" style="display:none">' +
+            render_cdrop_options(distinct_colors) +
+            '</div>' +
+            '</div>'
+        end
+
+        def render_cdrop_selected_content(_distinct_colors, selected_hex)
+          selected_hex = selected_hex.to_s.strip.upcase
+          return '<span>Seleccionar...</span>' if selected_hex.empty?
+
+          name = Store.color_name(selected_hex)
+          label = name.empty? ? selected_hex : name
+          hex_esc = Store.escape_html(selected_hex)
+          '<span class="cdrop-chip" style="background:' + hex_esc + ';"></span><span>' + Store.escape_html(label) + '</span>'
+        end
+
+        def render_cdrop_options(distinct_colors)
+          distinct_colors.map do |color_hex|
+            name = Store.color_name(color_hex)
+            label = name.empty? ? color_hex : name
+            hex_esc = Store.escape_html(color_hex)
+            '<div class="cdrop-opt" data-value="' + hex_esc + '">' +
+              '<span class="cdrop-chip" style="background:' + hex_esc + ';"></span>' +
+              '<span>' + Store.escape_html(label) + '</span>' +
+              '</div>'
+          end.join('')
+        end
+
+        def render_canto_espesor_options(selected)
+          selected = selected.to_s.strip
+          [
+            ['', 'Seleccionar...'],
+            ['0.45', '0.45mm'],
+            ['2', '2mm']
+          ].map do |val, label|
+            sel = val == selected ? ' selected' : ''
+            '<option value="' + Store.escape_html(val) + '"' + sel + '>' + Store.escape_html(label) + '</option>'
           end.join('')
         end
       end

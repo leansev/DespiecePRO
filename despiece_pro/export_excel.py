@@ -55,18 +55,43 @@ def group_modules(rows):
     return modules
 
 
-def collect_thicknesses(modules):
-    thicknesses = set()
+def piece_placa(piece):
+    placa = piece.get('placa_nombre')
+    if placa:
+        return placa
+    espesor = piece.get('espesor', 0)
+    return f'{int(espesor)}mm Blanco'
+
+
+def placa_sort_key(placa_nombre):
+    parts = placa_nombre.split(' ', 1)
+    th_str = parts[0] if parts else '0mm'
+    rest = parts[1] if len(parts) > 1 else ''
+    th_num = 0
+    if th_str.endswith('mm'):
+        try:
+            th_num = int(th_str[:-2])
+        except ValueError:
+            th_num = 0
+    return (-th_num, rest.lower())
+
+
+def collect_placas(modules):
+    placas = set()
     for _, pieces in modules:
         for piece in pieces:
-            thicknesses.add(piece.get('espesor', 0))
-    return sorted(thicknesses, reverse=True)
+            placas.add(piece_placa(piece))
+    return sorted(placas, key=placa_sort_key)
 
 
-def sheet_title(thickness):
-    if thickness == int(thickness):
-        return f'{int(thickness)}mm'
-    return f'{thickness}mm'
+def sanitize_sheet_name(name):
+    forbidden = ':\\/?*[]'
+    result = name
+    for ch in forbidden:
+        result = result.replace(ch, ' ')
+    if len(result) > 31:
+        result = result[:31]
+    return result
 
 
 def write_header_row(sheet, row_index):
@@ -131,7 +156,7 @@ def adjust_column_widths(sheet):
         sheet.column_dimensions[column_letter].width = width
 
 
-def write_sheet(workbook, sheet_name, project_title, modules, thickness):
+def write_sheet(workbook, sheet_name, project_title, modules, placa_nombre):
     sheet = workbook.create_sheet(title=sheet_name)
 
     row_index = 1
@@ -151,7 +176,7 @@ def write_sheet(workbook, sheet_name, project_title, modules, thickness):
     total_count = 0
     for module_label, pieces in modules:
         filtered_pieces = [
-            piece for piece in pieces if piece.get('espesor') == thickness
+            piece for piece in pieces if piece_placa(piece) == placa_nombre
         ]
         if not filtered_pieces:
             continue
@@ -173,21 +198,21 @@ def write_sheet(workbook, sheet_name, project_title, modules, thickness):
 def write_xlsx(output_path, payload):
     project_title = payload.get('project_title', 'PROYECTO: Sin nombre')
     modules = group_modules(payload.get('rows', []))
-    thicknesses = collect_thicknesses(modules)
+    placas = collect_placas(modules)
 
-    if not thicknesses:
-        thicknesses = [0]
+    if not placas:
+        placas = ['0mm Blanco']
 
     workbook = Workbook()
     workbook.remove(workbook.active)
 
-    for thickness in thicknesses:
+    for placa_nombre in placas:
         write_sheet(
             workbook,
-            sheet_title(thickness),
+            sanitize_sheet_name(placa_nombre),
             project_title,
             modules,
-            thickness,
+            placa_nombre,
         )
 
     workbook.save(output_path)
