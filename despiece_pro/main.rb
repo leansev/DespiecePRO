@@ -297,10 +297,12 @@ module BiraEstudio
             '</div>' +
             '<button class="edit-btn">✎</button>' +
             '</div>' +
+            '<div class="module-body">' +
             piece_rows +
             '<div class="module-pieces-row">' +
             '<button class="delete-btn">🗑</button>' +
             '<div class="module-pieces">Piezas: ' + piece_total.to_s + '</div>' +
+            '</div>' +
             '</div>' +
             '</div>'
         end

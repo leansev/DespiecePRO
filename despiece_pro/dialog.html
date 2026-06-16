@@ -49,6 +49,15 @@ body{
     align-items:center;
     padding:8px 12px;
     min-height:34px;
+    cursor:pointer;
+}
+
+.module-body{
+    display:none;
+}
+
+.module.open .module-body{
+    display:block;
 }
 
 .module-header-left{
@@ -336,6 +345,25 @@ body{
 <script>
 
 (function(){
+
+    var app = document.getElementById('app');
+    var scrollTimer = null;
+
+    if(app){
+        var savedScroll = sessionStorage.getItem('scrollTop');
+        if(savedScroll !== null && savedScroll !== ''){
+            app.scrollTop = parseInt(savedScroll, 10) || 0;
+        }
+
+        app.addEventListener('scroll', function(){
+            if(scrollTimer){
+                clearTimeout(scrollTimer);
+            }
+            scrollTimer = setTimeout(function(){
+                sessionStorage.setItem('scrollTop', String(app.scrollTop));
+            }, 100);
+        });
+    }
 
     function findParentByClass(el, className){
         while(el && el !== document.body){
@@ -698,6 +726,26 @@ body{
         }
 
     }, false);
+
+    var moduleHeaders = document.querySelectorAll('.module-header');
+    var h;
+    for(h = 0; h < moduleHeaders.length; h++){
+        (function(header){
+            header.addEventListener('click', function(e){
+                var target = e.target;
+                while(target && target !== header){
+                    if(target.classList && target.classList.contains('edit-btn')){
+                        return;
+                    }
+                    target = target.parentNode;
+                }
+                var module = findParentByClass(header, 'module');
+                if(module){
+                    module.classList.toggle('open');
+                }
+            });
+        })(moduleHeaders[h]);
+    }
 
 })();
 
