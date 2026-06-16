@@ -337,6 +337,9 @@ body{
                 💾 Guardar
             </button>
             <button class="export-btn" onclick="openInfo();"> Info placas</button>
+            <button class="export-btn" onclick="refreshAll();">
+                🔄 Refresh
+            </button>
         </div>
     </div>
 
@@ -635,6 +638,12 @@ body{
     window.openInfo = function(){
         if(window.sketchup && sketchup.open_info){
             sketchup.open_info();
+        }
+    };
+
+    window.refreshAll = function(){
+        if(window.sketchup && sketchup.refresh_all){
+            sketchup.refresh_all();
         }
     };
 

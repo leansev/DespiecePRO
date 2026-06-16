@@ -461,6 +461,73 @@ module BiraEstudio
           false
         end
 
+        def refresh_all_modules
+          model = Sketchup.active_model
+          uid_map = build_uid_entity_map(model)
+          scanner = BiraEstudio::DespiecePro::ScanModuleTool.new
+          report = { added: [], removed: [], changed: [] }
+
+          @modules.each do |entry|
+            uid = entry[:uid]
+            entity = uid_map[uid]
+
+            unless entity && entity.valid?
+              report[:removed] << { module_name: entry[:name], reason: 'grupo eliminado del modelo' }
+              next
+            end
+
+            begin
+              pieces = scanner.collect_pieces(entity)
+              new_grouped = scanner.group_pieces_by_dimensions(pieces)
+            rescue StandardError => e
+              puts "Despiece PRO refresh: error escaneando #{entry[:name]} - #{e.message}"
+              next
+            end
+
+            old_keys = entry[:pieces].map { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') }
+            new_keys = new_grouped.map { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') }
+
+            added_keys = new_keys - old_keys
+            removed_keys = old_keys - new_keys
+            changed_keys = (old_keys & new_keys).select do |k|
+              old_p = entry[:pieces].find { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') == k }
+              new_p = new_grouped.find { |p| piece_dim_key(p[:length], p[:width], p[:thickness], p[:color] || '#FFFFFF') == k }
+              old_p && new_p && old_p[:count] != new_p[:count]
+            end
+
+            added_keys.each do |k|
+              p = new_grouped.find { |np| piece_dim_key(np[:length], np[:width], np[:thickness], np[:color] || '#FFFFFF') == k }
+              name = (entry[:piece_names] || {})[k].to_s
+              report[:added] << { module_name: entry[:name], piece: p, name: name }
+            end
+
+            removed_keys.each do |k|
+              p = entry[:pieces].find { |op| piece_dim_key(op[:length], op[:width], op[:thickness], op[:color] || '#FFFFFF') == k }
+              name = (entry[:piece_names] || {})[k].to_s
+              report[:removed] << { module_name: entry[:name], piece: p, name: name }
+            end
+
+            changed_keys.each do |k|
+              old_p = entry[:pieces].find { |op| piece_dim_key(op[:length], op[:width], op[:thickness], op[:color] || '#FFFFFF') == k }
+              new_p = new_grouped.find { |np| piece_dim_key(np[:length], np[:width], np[:thickness], np[:color] || '#FFFFFF') == k }
+              name = (entry[:piece_names] || {})[k].to_s
+              report[:changed] << { module_name: entry[:name], old: old_p, new: new_p, name: name }
+            end
+
+            # Actualizar piezas preservando nombres y cantos
+            entry[:pieces] = new_grouped
+          end
+
+          # Eliminar módulos cuyos grupos ya no existen
+          @modules.reject! do |entry|
+            entity = uid_map[entry[:uid]]
+            !(entity && entity.valid?)
+          end
+
+          save_to_model(model)
+          report
+        end
+
         def restore_from_model(model)
           return 0 unless model
 
@@ -1088,6 +1155,59 @@ module BiraEstudio
           apply_list_html
         end
 
+        def refresh_all
+          return unless @dialog && @dialog.visible?
+
+          report = Store.refresh_all_modules
+          apply_list_html
+          show_refresh_report(report)
+        end
+
+        def show_refresh_report(report)
+          added   = report[:added]   || []
+          removed = report[:removed] || []
+          changed = report[:changed] || []
+
+          return if added.empty? && removed.empty? && changed.empty?
+
+          lines = []
+
+          unless added.empty?
+            lines << "PIEZAS AGREGADAS (#{added.length}):"
+            added.each do |item|
+              dim = item[:piece] ? "#{item[:piece][:length]}x#{item[:piece][:width]}x#{item[:piece][:thickness]}mm" : ''
+              name = item[:name].empty? ? dim : "#{item[:name]} (#{dim})"
+              lines << "  + #{item[:module_name]}: #{name}"
+            end
+          end
+
+          unless removed.empty?
+            lines << '' unless lines.empty?
+            lines << "PIEZAS ELIMINADAS (#{removed.length}):"
+            removed.each do |item|
+              if item[:piece]
+                dim = "#{item[:piece][:length]}x#{item[:piece][:width]}x#{item[:piece][:thickness]}mm"
+                name = item[:name].empty? ? dim : "#{item[:name]} (#{dim})"
+                lines << "  - #{item[:module_name]}: #{name}"
+              else
+                lines << "  - #{item[:module_name]}: #{item[:reason]}"
+              end
+            end
+          end
+
+          unless changed.empty?
+            lines << '' unless lines.empty?
+            lines << "CANTIDAD CAMBIADA (#{changed.length}):"
+            changed.each do |item|
+              dim = "#{item[:old][:length]}x#{item[:old][:width]}x#{item[:old][:thickness]}mm"
+              name = item[:name].empty? ? dim : "#{item[:name]} (#{dim})"
+              lines << "  ~ #{item[:module_name]}: #{name} #{item[:old][:count]}x → #{item[:new][:count]}x"
+            end
+          end
+
+          UI.messagebox(lines.join("\n"))
+        end
+
         def show
           restored = Store.restore_from_model(Sketchup.active_model)
           @dialog ||= build_dialog
@@ -1153,6 +1273,10 @@ module BiraEstudio
 
           dialog.add_action_callback('refresh_list') do |_context|
             refresh
+          end
+
+          dialog.add_action_callback('refresh_all') do |_context|
+            refresh_all
           end
 
           dialog.add_action_callback('remove_module') do |_context, entity_id|
