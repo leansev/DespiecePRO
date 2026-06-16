@@ -406,7 +406,7 @@ body{
         }
     }
 
-    function saveModule(module){
+    function saveModuleNameToStore(module){
 
         var entityId =
             module.getAttribute('data-entity-id');
@@ -424,38 +424,121 @@ body{
                 trim(moduleName.innerText)
             );
         }
+    }
+
+    function savePieceNameToStore(module, row){
+
+        var entityId =
+            module.getAttribute('data-entity-id');
+
+        var dimKey =
+            row.getAttribute('data-dim-key');
+
+        var pieceName =
+            row.querySelector('.piece-name');
+
+        if(
+            window.sketchup &&
+            sketchup.update_piece_name &&
+            pieceName
+        ){
+            sketchup.update_piece_name(
+                entityId,
+                dimKey,
+                trim(pieceName.innerText)
+            );
+        }
+    }
+
+    function flushModuleToStore(module){
+
+        saveModuleNameToStore(module);
+
+        var rows =
+            module.querySelectorAll('.piece-row');
+
+        for(var i=0;i<rows.length;i++){
+            savePieceNameToStore(module, rows[i]);
+        }
+    }
+
+    function flushAllEditingModules(){
+
+        var modules =
+            document.querySelectorAll('.module[data-editing="true"]');
+
+        for(var i=0;i<modules.length;i++){
+            flushModuleToStore(modules[i]);
+        }
+    }
+
+    function bindAutoSave(module){
+
+        var moduleName =
+            module.querySelector('.module-name');
+
+        if(moduleName){
+
+            moduleName.onblur = function(){
+
+                if(module.getAttribute('data-editing') !== 'true'){
+                    return;
+                }
+
+                saveModuleNameToStore(module);
+            };
+        }
 
         var rows =
             module.querySelectorAll('.piece-row');
 
         for(var i=0;i<rows.length;i++){
 
-            var row = rows[i];
+            (function(row){
 
-            var dimKey =
-                row.getAttribute('data-dim-key');
+                var pieceName =
+                    row.querySelector('.piece-name');
 
-            var pieceName =
-                row.querySelector('.piece-name');
+                if(!pieceName){
+                    return;
+                }
 
-            if(
-                window.sketchup &&
-                sketchup.update_piece_name &&
-                pieceName
-            ){
-                sketchup.update_piece_name(
-                    entityId,
-                    dimKey,
-                    trim(pieceName.innerText)
-                );
-            }
+                pieceName.onblur = function(){
+
+                    if(module.getAttribute('data-editing') !== 'true'){
+                        return;
+                    }
+
+                    savePieceNameToStore(module, row);
+                };
+
+            })(rows[i]);
         }
+    }
 
-        if(
-            window.sketchup &&
-            sketchup.refresh_list
-        ){
-            sketchup.refresh_list();
+    function closeEditingModule(module){
+
+        flushModuleToStore(module);
+        disableEdit(module);
+
+        var btn =
+            module.querySelector('.edit-btn');
+
+        if(btn){
+            btn.innerHTML = '&#9998;';
+        }
+    }
+
+    function closeOtherEditingModules(currentModule){
+
+        var modules =
+            document.querySelectorAll('.module[data-editing="true"]');
+
+        for(var i=0;i<modules.length;i++){
+
+            if(modules[i] !== currentModule){
+                closeEditingModule(modules[i]);
+            }
         }
     }
 
@@ -478,6 +561,8 @@ body{
 
     window.exportExcel = function(){
 
+        flushAllEditingModules();
+
         if(
             window.sketchup &&
             sketchup.export_excel
@@ -487,6 +572,8 @@ body{
     };
 
     window.saveState = function(){
+
+        flushAllEditingModules();
 
         if(
             window.sketchup &&
@@ -515,6 +602,8 @@ body{
                 return;
             }
 
+            flushAllEditingModules();
+
             if(
                 window.sketchup &&
                 sketchup.remove_module
@@ -542,13 +631,13 @@ body{
 
         if(editing){
 
-            saveModule(module);
-            disableEdit(module);
-            btn.innerHTML = '&#9998;';
+            closeEditingModule(module);
 
         }else{
 
+            closeOtherEditingModules(module);
             bindClearDefaultText(module);
+            bindAutoSave(module);
             enableEdit(module);
             btn.innerHTML = '✓';
 
