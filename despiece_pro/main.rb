@@ -747,11 +747,6 @@ module BiraEstudio
             return
           end
 
-          path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
-          return unless path
-
-          path = normalize_xlsx_path(path)
-
           sin_nombre = []
           Store.modules.each do |entry|
             entry[:pieces].each do |piece|
@@ -768,6 +763,11 @@ module BiraEstudio
             InfoDialog.show
             return
           end
+
+          path = UI.savepanel('Guardar Excel', '', 'despiece.xlsx')
+          return unless path
+
+          path = normalize_xlsx_path(path)
 
           if write_xlsx(path)
             Sketchup.status_text = "Excel exportado: #{path}"
